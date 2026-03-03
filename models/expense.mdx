@@ -1,0 +1,213 @@
+---
+title: 'Expense'
+description: 'Data model for individual expense records in Divvy'
+---
+
+The `Expense` model represents a single expense transaction within a group. It tracks who paid, the amount, and how the expense should be split among group members.
+
+## Data Class Definition
+
+```kotlin Expense.kt
+package com.example.divvy.models
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class Expense(
+    val id: String = "",
+    @SerialName("group_id")        val groupId: String = "",
+    val merchant: String = "",
+    @SerialName("amount_cents")    val amountCents: Long = 0L,
+    @SerialName("split_method")    val splitMethod: String = "EQUAL",
+    val currency: String = "USD",
+    @SerialName("paid_by_user_id") val paidByUserId: String = "",
+    @SerialName("created_at")      val createdAt: String = ""
+)
+```
+
+Source: Expense.kt
+
+## Fields
+
+<ParamField path="id" type="String" default='""'>
+  Unique identifier for the expense
+</ParamField>
+
+<ParamField path="groupId" type="String" default='""'>
+  ID of the group this expense belongs to. Serialized as `group_id` in JSON/database.
+</ParamField>
+
+<ParamField path="merchant" type="String" default='""'>
+  Name of the merchant or description of the expense (e.g., "Grocery Store", "Dinner at Restaurant")
+</ParamField>
+
+<ParamField path="amountCents" type="Long" default="0L">
+  Total amount of the expense in cents. Serialized as `amount_cents` in JSON/database.
+</ParamField>
+
+<ParamField path="splitMethod" type="String" default='"EQUAL"'>
+  Method for splitting the expense among members. Common values:
+  - `"EQUAL"` - Split evenly among all participants
+  - `"PERCENTAGE"` - Split by custom percentages
+  - `"EXACT"` - Split by exact amounts
+  
+  Serialized as `split_method` in JSON/database.
+</ParamField>
+
+<ParamField path="currency" type="String" default='"USD"'>
+  Three-letter ISO currency code for the transaction
+</ParamField>
+
+<ParamField path="paidByUserId" type="String" default='""'>
+  User ID of the member who paid for the expense. Serialized as `paid_by_user_id` in JSON/database.
+</ParamField>
+
+<ParamField path="createdAt" type="String" default='""'>
+  ISO timestamp when the expense was created. Serialized as `created_at` in JSON/database.
+</ParamField>
+
+## Serialization
+
+The `Expense` model uses Kotlin Serialization with snake_case field names for database compatibility:
+
+| Kotlin Property | JSON/Database Field |
+|----------------|---------------------|
+| `groupId` | `group_id` |
+| `amountCents` | `amount_cents` |
+| `splitMethod` | `split_method` |
+| `paidByUserId` | `paid_by_user_id` |
+| `createdAt` | `created_at` |
+
+## Related Models
+
+### GroupExpense
+
+For a more comprehensive expense model with split details, see GroupExpense. The `GroupExpense` model extends `Expense` with:
+- Detailed split information per user
+- `title` field instead of `merchant`
+- List of `ExpenseSplit` objects
+
+### ExpenseSplit
+
+From [GroupExpense.kt]:
+
+```kotlin
+@Serializable
+data class ExpenseSplit(
+    @SerialName("user_id")       val userId: String,
+    @SerialName("amount_cents")  val amountCents: Long,
+    @SerialName("is_covered_by") val isCoveredBy: String? = null
+)
+```
+
+### Split
+
+A simpler split model used in some contexts:
+
+```kotlin Split.kt
+@Serializable
+data class Split(
+    val userId: String,
+    val amountCents: Long,
+    val coveredByUserId: String? = null
+)
+```
+
+Source: Split.kt
+
+## Usage Examples
+
+### Creating an Expense
+
+```kotlin
+val expense = Expense(
+    id = "exp_456",
+    groupId = "grp_123",
+    merchant = "Whole Foods",
+    amountCents = 8599L, // $85.99
+    splitMethod = "EQUAL",
+    currency = "USD",
+    paidByUserId = "user_abc",
+    createdAt = "2026-03-03T10:30:00Z"
+)
+```
+
+### Repository Operations
+
+From [ExpensesRepository.kt]:
+
+```kotlin
+// List all expenses for a group
+suspend fun listExpensesByGroup(groupId: String): List<Expense>
+
+// Create a new expense
+suspend fun createExpense(
+    groupId: String,
+    description: String,
+    amountCents: Long,
+    splitMethod: String
+): GroupExpense
+
+// Update an existing expense
+suspend fun updateExpense(
+    expenseId: String,
+    description: String,
+    amountCents: Long,
+    splitMethod: String
+)
+
+// Delete an expense
+suspend fun deleteExpense(expenseId: String)
+```
+
+### Converting to GroupExpense
+
+From [ExpensesRepository.kt:158]:
+
+```kotlin
+private fun Expense.toGroupExpense() = GroupExpense(
+    id = id,
+    groupId = groupId,
+    title = merchant,
+    amountCents = amountCents,
+    paidByUserId = paidByUserId,
+    splits = emptyList(),
+    createdAt = createdAt
+)
+```
+
+## Split Methods
+
+### Equal Split
+
+From [GroupExpense.kt:30]:
+
+```kotlin
+/**
+ * Splits [amountCents] evenly across [userIds].
+ * Leftover cents (from integer division) are distributed one per person
+ * to the first members in the list.
+ */
+fun splitEqually(amountCents: Long, userIds: List<String>): List<ExpenseSplit> {
+    require(userIds.isNotEmpty()) { "userIds must not be empty" }
+    val base      = amountCents / userIds.size
+    val remainder = (amountCents % userIds.size).toInt()
+    return userIds.mapIndexed { index, userId ->
+        ExpenseSplit(userId, if (index < remainder) base + 1 else base)
+    }
+}
+```
+
+### Percentage Split
+
+From [GroupExpense.kt:44]:
+
+```kotlin
+/**
+ * Splits [amountCents] according to [percentages], a map of userId → share (0–100).
+ * Percentages must sum to 100 (±0.01 tolerance).
+ * Rounding uses the largest-remainder method so the splits always total exactly [amountCents].
+ */
+fun splitByPercentage(amountCents: Long, percentages: Map<String, Double>): List<ExpenseSplit>
+```

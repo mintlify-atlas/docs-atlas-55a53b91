@@ -1,0 +1,176 @@
+---
+title: Receipt Scanning
+description: Scan receipts with your camera to automatically extract items and prices
+---
+
+## Overview
+
+Receipt scanning uses your phone's camera and OCR technology to extract expense details automatically. Point your camera at a receipt, and Divvy will detect the total amount, merchant name, and individual line items.
+
+## How It Works
+
+Receipt scanning leverages **CameraX** (Android's modern camera library) with ML-powered text recognition to identify:
+
+- Total amount
+- Merchant/store name
+- Individual items and prices
+- Tax and tip amounts
+
+<Info>
+Receipt scanning works best with clear, well-lit photos of printed receipts.
+</Info>
+
+## Scanning a Receipt
+
+To scan a receipt:
+
+1. From the expense creation screen, tap the camera icon
+2. **Grant camera permission** when prompted (required for first use)
+3. Position your receipt within the on-screen frame
+4. Align the receipt so all text is visible and level
+5. Tap the **capture button** (large amber circle)
+6. Wait 2-3 seconds while Divvy processes the image
+
+### Visual Guidance
+
+The scanner provides helpful guides:
+
+- **Frame overlay**: White corner brackets show the optimal capture area (260dp × 320dp)
+- **Auto-detect indicator**: "Auto-detect ON" badge shows scanning is active
+- **Status text**: "Align receipt within frame for best results"
+
+## Scanning Flow
+
+<Steps>
+  <Step title="Camera Permission">
+    On first use, you'll be asked to grant camera access. Divvy uses the `CAMERA` permission to access your device camera.
+    
+    ```kotlin
+    Manifest.permission.CAMERA
+    ```
+  </Step>
+  
+  <Step title="Position Receipt">
+    Place the receipt flat on a surface or hold it steady. Make sure:
+    - All text is readable
+    - The receipt fits within the frame
+    - Lighting is adequate
+    - There's no glare or shadows
+  </Step>
+  
+  <Step title="Capture">
+    Tap the amber circular button to capture the image. The camera will freeze and begin processing.
+  </Step>
+  
+  <Step title="Processing">
+    Divvy analyzes the image and extracts:
+    - Total amount
+    - Merchant description
+    - Individual items (if using itemized split)
+    
+    A progress indicator shows "Scanning receipt... Detecting items and prices".
+  </Step>
+  
+  <Step title="Review">
+    Once complete, you'll see:
+    - ✓ "Receipt scanned!" confirmation
+    - Number of items detected (e.g., "3 items detected")
+    - Total amount extracted (e.g., "$47.83")
+    
+    The expense form auto-fills with this data.
+  </Step>
+</Steps>
+
+## Extracted Data
+
+After scanning, the following fields are populated:
+
+- **Amount**: `$47.83` (automatically formatted)
+- **Description**: `"Dinner at Maple Bistro"` (merchant name from receipt)
+- **Items** (if itemized split): Individual line items with prices
+
+## Editing Scanned Data
+
+You can review and edit all scanned data before creating the expense:
+
+- Tap the amount field to adjust the total
+- Tap the description to change the merchant name
+- When using **Itemized Split**, you can:
+  - Edit item names
+  - Adjust item prices
+  - Add or remove items
+  - Assign items to specific people
+
+<Note>
+Always double-check scanned amounts for accuracy. OCR isn't perfect and may misread damaged or poorly printed receipts.
+</Note>
+
+## Tips for Best Results
+
+<AccordionGroup>
+  <Accordion title="Lighting">
+    - Use natural light or bright indoor lighting
+    - Avoid harsh shadows across the receipt
+    - Turn on flash if the receipt is dark or faded
+  </Accordion>
+  
+  <Accordion title="Receipt Condition">
+    - Flatten crumpled receipts before scanning
+    - Smooth out folds that obscure text
+    - Ensure thermal receipts haven't faded
+  </Accordion>
+  
+  <Accordion title="Camera Angle">
+    - Hold your phone directly above the receipt (birds-eye view)
+    - Keep the camera parallel to the receipt surface
+    - Avoid tilting or angling the camera
+  </Accordion>
+  
+  <Accordion title="Receipt Placement">
+    - Center the receipt within the frame guides
+    - Ensure all edges are visible
+    - Remove background clutter
+  </Accordion>
+</AccordionGroup>
+
+## Supported Receipt Formats
+
+Receipt scanning works with:
+
+- Printed paper receipts (thermal or ink)
+- Restaurant bills
+- Grocery store receipts
+- Retail purchase receipts
+- Itemized invoices
+
+<Warning>
+Digital receipts displayed on another screen may not scan reliably due to glare and screen refresh rates.
+</Warning>
+
+## Alternative: Gallery Upload
+
+If you already have a photo of your receipt:
+
+1. Tap the **gallery icon** (left of capture button)
+2. Select a receipt image from your photo library
+3. Divvy will process it the same way
+
+## Technical Implementation
+
+Receipt scanning uses:
+
+- **CameraX**: Modern Android camera API for preview and capture
+- **ProcessCameraProvider**: Manages camera lifecycle
+- **Back camera**: `CameraSelector.DEFAULT_BACK_CAMERA`
+- **Text recognition ML**: Extracts structured data from images
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/scanreceipt/Views/ScanReceiptScreen.kt:1`
+
+## Troubleshooting
+
+If scanning fails:
+
+- Ensure camera permission is granted in Settings > Apps > Divvy > Permissions
+- Try scanning in better lighting
+- Manually enter the amount if OCR can't read the receipt
+- Use the gallery option if live scanning doesn't work

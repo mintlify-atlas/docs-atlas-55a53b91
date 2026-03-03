@@ -1,0 +1,458 @@
+---
+title: AuthRepository
+description: Repository for managing user authentication, sessions, and OAuth flows in Divvy
+---
+
+## Overview
+
+`AuthRepository` handles user authentication and session management. It provides a simple interface for getting the current user ID, with the actual authentication flow managed by Supabase Auth.
+
+**Interface**: `backend/AuthRepository.kt:10`  
+**Implementation**: `backend/SupabaseAuthRepository.kt:15`
+
+## Interface Definition
+
+```kotlin
+interface AuthRepository {
+    fun getCurrentUserId(): String
+}
+```
+
+## Implementation
+
+### SupabaseAuthRepository
+
+```kotlin
+@Singleton
+class SupabaseAuthRepository @Inject constructor(
+    private val supabaseClient: SupabaseClient
+) : AuthRepository {
+
+    override fun getCurrentUserId(): String =
+        if (BuildConfig.AUTH_BYPASS) DummyAccount.USER_ID
+        else supabaseClient.auth.currentUserOrNull()?.id
+            ?: error("No authenticated user")
+}
+```
+
+**Features**:
+- Returns current authenticated user ID
+- Supports development bypass mode
+- Throws error if no user is authenticated
+
+## Methods
+
+### getCurrentUserId
+
+Returns the ID of the currently authenticated user.
+
+```kotlin
+fun getCurrentUserId(): String
+```
+
+**Returns**: `String` - The authenticated user's ID
+
+**Throws**: `IllegalStateException` - If no user is authenticated
+
+**Example Usage**:
+
+```kotlin
+@Singleton
+class SupabaseExpensesRepository @Inject constructor(
+    private val supabaseClient: SupabaseClient,
+    private val authRepository: AuthRepository
+) : ExpensesRepository {
+
+    override suspend fun createExpense(
+        groupId: String,
+        description: String,
+        amountCents: Long,
+        splitMethod: String
+    ): Expense {
+        val expense = Expense(
+            groupId = groupId,
+            merchant = description,
+            amountCents = amountCents,
+            splitMethod = splitMethod,
+            currency = "USD",
+            paidByUserId = authRepository.getCurrentUserId() // Get current user
+        )
+        return supabaseClient.from("expenses")
+            .insert(expense) { select() }
+            .decodeSingle()
+    }
+}
+```
+
+## Authentication Flow
+
+While `AuthRepository` only exposes `getCurrentUserId()`, the actual authentication is handled by `AuthFlowViewModel` and Supabase Auth.
+
+### Supported Authentication Methods
+
+Source: `ui/auth/ViewModels/AuthFlowViewModel.kt:42`
+
+#### 1. Phone Authentication (OTP)
+
+**Send OTP**:
+
+```kotlin
+fun sendPhoneOtp(createUser: Boolean, onSuccess: () -> Unit)
+```
+
+**Implementation**:
+
+```kotlin
+fun sendPhoneOtp(createUser: Boolean, onSuccess: () -> Unit) {
+    val phone = phoneE164() // Format: +1234567890
+    
+    launchAuth {
+        _state.update { it.copy(authMethod = "PHONE") }
+        SupabaseClientProvider.client.auth.signInWith(OTP) {
+            this.phone = phone
+            this.createUser = createUser
+        }
+        _state.update { it.copy(otpSent = true) }
+        onSuccess()
+    }
+}
+```
+
+**Verify OTP**:
+
+```kotlin
+fun verifyPhoneOtp(onSuccess: () -> Unit)
+```
+
+**Implementation**:
+
+```kotlin
+fun verifyPhoneOtp(onSuccess: () -> Unit) {
+    val token = state.value.otp.trim() // 6-digit code
+    val phone = phoneE164()
+    
+    launchAuth {
+        SupabaseClientProvider.client.auth.verifyPhoneOtp(
+            type = OtpType.Phone.SMS,
+            phone = phone,
+            token = token
+        )
+        _state.update { it.copy(phoneVerified = true) }
+        onSuccess()
+    }
+}
+```
+
+#### 2. Google OAuth
+
+**Start OAuth Flow**:
+
+```kotlin
+fun startGoogleSignIn(flow: OAuthFlow)
+```
+
+**Implementation**:
+
+```kotlin
+fun startGoogleSignIn(flow: OAuthFlow) {
+    pendingOAuthFlow = flow
+    _state.update { it.copy(authMethod = "GOOGLE") }
+    launchAuth {
+        SupabaseClientProvider.client.auth.signInWith(Google)
+    }
+}
+```
+
+**OAuth Flow Enum**:
+
+```kotlin
+enum class OAuthFlow {
+    CREATE,  // Creating new account
+    LOGIN    // Logging into existing account
+}
+```
+
+### Deep Link Handling
+
+Google OAuth uses deep links to return to the app after authentication.
+
+Source: `AuthActivity.kt:15`
+
+```kotlin
+@AndroidEntryPoint
+class AuthActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        if (SupabaseClientProvider.isConfigured()) {
+            // Handle OAuth redirect on activity creation
+            SupabaseClientProvider.client.handleDeeplinks(intent)
+        }
+        
+        setContent {
+            DivvyTheme {
+                AuthNav(onAuthenticated = {
+                    startActivity(Intent(this, MainActivity::class.java))
+                    finish()
+                })
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        
+        if (SupabaseClientProvider.isConfigured()) {
+            // Handle OAuth redirect when app is already running
+            SupabaseClientProvider.client.handleDeeplinks(intent)
+        }
+    }
+}
+```
+
+**Configuration**:
+
+Deep links must be configured in `AndroidManifest.xml` to handle the OAuth redirect URL.
+
+## Session Management
+
+### Session Status Observing
+
+Source: `ui/auth/ViewModels/AuthFlowViewModel.kt:51`
+
+```kotlin
+val sessionStatus: StateFlow<SessionStatus> = 
+    if (SupabaseClientProvider.isConfigured()) {
+        SupabaseClientProvider.client.auth.sessionStatus
+    } else {
+        MutableStateFlow(SessionStatus.NotAuthenticated)
+    }
+```
+
+**SessionStatus States**:
+- `NotAuthenticated` - No active session
+- `LoadingFromStorage` - Checking for saved session
+- `Authenticated` - Valid session exists
+- `NetworkError` - Network issue during auth
+
+### Retrieving Current User
+
+Source: `ui/auth/ViewModels/AuthFlowViewModel.kt:150`
+
+```kotlin
+val user = SupabaseClientProvider.client.auth.currentUserOrNull()
+    ?: SupabaseClientProvider.client.auth.retrieveUserForCurrentSession(updateSession = true)
+```
+
+**When to Use**:
+- `currentUserOrNull()` - Quick check, returns cached user or null
+- `retrieveUserForCurrentSession()` - Fetches from server and updates session
+
+## User Profile Creation
+
+After authentication, users must create a profile with their details.
+
+Source: `ui/auth/ViewModels/AuthFlowViewModel.kt:135`
+
+```kotlin
+fun saveProfile(onSuccess: () -> Unit) {
+    val first = state.value.firstName.trim()
+    val last = state.value.lastName.trim()
+    val enteredEmail = state.value.profileEmail.trim()
+    val phone = phoneE164()
+    
+    launchAuth {
+        val user = SupabaseClientProvider.client.auth.currentUserOrNull()
+            ?: SupabaseClientProvider.client.auth.retrieveUserForCurrentSession(updateSession = true)
+        
+        val email = enteredEmail.ifBlank { user.email.orEmpty() }
+        val method = state.value.authMethod ?: "PHONE"
+        
+        profilesRepository.upsertProfile(
+            ProfileRow(
+                id = user.id,
+                firstName = first,
+                lastName = last,
+                authMethod = method,
+                email = email,
+                phone = phone,
+                phoneVerified = state.value.phoneVerified
+            )
+        )
+        onSuccess()
+    }
+}
+```
+
+### Checking Profile Existence
+
+Source: `ui/auth/ViewModels/AuthFlowViewModel.kt:196`
+
+```kotlin
+suspend fun hasProfile(): Boolean {
+    return try {
+        val user = SupabaseClientProvider.client.auth.currentUserOrNull()
+            ?: SupabaseClientProvider.client.auth.retrieveUserForCurrentSession(updateSession = true)
+        profilesRepository.getProfile(user.id) != null
+    } catch (_: Exception) {
+        false
+    }
+}
+```
+
+## Auth State Management
+
+Source: `ui/auth/ViewModels/AuthFlowViewModel.kt:26`
+
+```kotlin
+data class AuthFlowState(
+    val otp: String = "",
+    val firstName: String = "",
+    val lastName: String = "",
+    val profileEmail: String = "",
+    val phoneDigits: String = "",
+    val countryCode: String = "+1",
+    val countryFlag: String = "🇺🇸",
+    val phoneVerified: Boolean = false,
+    val authMethod: String? = null,
+    val otpSent: Boolean = false,
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null
+)
+```
+
+### State Updates
+
+```kotlin
+// Update phone number
+fun updatePhoneDigits(value: String) = _state.update {
+    val method = if (it.authMethod == "GOOGLE") it.authMethod else "PHONE"
+    val maxDigits = maxDigitsForCountry(it.countryCode)
+    val digits = value.filter { ch -> ch.isDigit() }.take(maxDigits)
+    it.copy(
+        phoneDigits = digits,
+        phoneVerified = false,
+        otp = "",
+        otpSent = false,
+        errorMessage = null,
+        authMethod = method
+    )
+}
+
+// Update OTP code
+fun updateOtp(value: String) = 
+    _state.update { it.copy(otp = value, errorMessage = null) }
+
+// Update profile info
+fun updateFirstName(value: String) = 
+    _state.update { it.copy(firstName = value, errorMessage = null) }
+    
+fun updateLastName(value: String) = 
+    _state.update { it.copy(lastName = value, errorMessage = null) }
+    
+fun updateProfileEmail(value: String) = 
+    _state.update { it.copy(profileEmail = value, errorMessage = null) }
+```
+
+## Error Handling
+
+Source: `ui/auth/ViewModels/AuthFlowViewModel.kt:219`
+
+```kotlin
+private fun launchAuth(block: suspend () -> Unit) {
+    viewModelScope.launch {
+        _state.update { it.copy(isLoading = true, errorMessage = null) }
+        try {
+            block()
+        } catch (e: Exception) {
+            val raw = e.message ?: "Something went wrong."
+            val friendly = if (raw.contains("Token has expired", ignoreCase = true) ||
+                raw.contains("invalid", ignoreCase = true)
+            ) {
+                "Code is invalid or expired. Please request a new one."
+            } else {
+                raw.lines().firstOrNull()?.take(160) ?: "Something went wrong."
+            }
+            _state.update { it.copy(errorMessage = friendly) }
+        } finally {
+            _state.update { it.copy(isLoading = false) }
+        }
+    }
+}
+```
+
+**Common Errors**:
+- Invalid or expired OTP code
+- Missing Supabase configuration
+- Network connectivity issues
+- Phone number format errors
+- Missing required profile fields
+
+## Development Mode
+
+The repository supports an auth bypass for development:
+
+```kotlin
+override fun getCurrentUserId(): String =
+    if (BuildConfig.AUTH_BYPASS) DummyAccount.USER_ID
+    else supabaseClient.auth.currentUserOrNull()?.id
+        ?: error("No authenticated user")
+```
+
+Source: `AuthActivity.kt:18`
+
+```kotlin
+if (FeatureFlags.AUTH_BYPASS) {
+    startActivity(Intent(this, MainActivity::class.java))
+    finish()
+    return
+}
+```
+
+## Complete Authentication Flow Example
+
+### 1. Phone Authentication
+
+```kotlin
+// Step 1: Send OTP
+authViewModel.updatePhoneDigits("5551234567")
+authViewModel.sendPhoneOtp(createUser = true) {
+    navigateToOtpVerification()
+}
+
+// Step 2: Verify OTP
+authViewModel.updateOtp("123456")
+authViewModel.verifyPhoneOtp {
+    navigateToProfileCreation()
+}
+
+// Step 3: Create Profile
+authViewModel.updateFirstName("John")
+authViewModel.updateLastName("Doe")
+authViewModel.updateProfileEmail("john@example.com")
+authViewModel.saveProfile {
+    navigateToMainApp()
+}
+```
+
+### 2. Google OAuth
+
+```kotlin
+// Step 1: Start OAuth flow
+authViewModel.startGoogleSignIn(OAuthFlow.CREATE)
+
+// Step 2: Handle redirect (automatic via handleDeeplinks)
+
+// Step 3: Check if profile exists
+if (!authViewModel.hasProfile()) {
+    navigateToProfileCreation()
+} else {
+    navigateToMainApp()
+}
+```
+
+## See Also
+
+- [Repository Pattern Overview](/repositories/overview)
+- [Supabase Auth Documentation](https://supabase.com/docs/guides/auth)

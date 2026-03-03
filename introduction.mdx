@@ -1,0 +1,88 @@
+---
+title: Introduction
+description: Split expenses at the moment of payment with Divvy's mobile expense-splitting app
+---
+
+## What is Divvy?
+
+Divvy is a mobile app that simplifies group expense splitting by bringing it to the moment of payment. Rather than relying on users to manually log expenses afterward, Divvy integrates with bank transactions to quickly create a Splitwise-style interface whenever a purchase is likely to be shared.
+
+Using Plaid (or via bank statements), Divvy detects relevant transactions and allows you to instantly form groups through deep links or shared context. You can scan receipts to extract itemized purchases, assign items to individuals, and automatically split tax and tip proportionally.
+
+## Why Divvy?
+
+Divvy solves the common problem of forgetting to log shared expenses until days or weeks later. By integrating directly with your payment context, Divvy makes expense splitting:
+
+<CardGroup cols={2}>
+  <Card title="Faster" icon="bolt">
+    Split expenses at the moment of payment, not days later
+  </Card>
+  <Card title="More accurate" icon="check">
+    Scan receipts to extract exact items and amounts automatically
+  </Card>
+  <Card title="Flexible" icon="hand-holding-dollar">
+    Support real-world scenarios like one person covering another's share
+  </Card>
+  <Card title="Easy to track" icon="chart-line">
+    Clear ledgers show who owes whom at a glance
+  </Card>
+</CardGroup>
+
+## Key features
+
+### Receipt scanning
+
+Scan receipts with your camera to automatically extract itemized purchases. Divvy uses OCR to detect items, prices, tax, and tip.
+
+### Multiple split methods
+
+Divvy supports flexible expense splitting:
+
+- **Equal split**: Divide the total evenly among all members
+- **By item**: Assign specific items to individuals
+- **By percentage**: Customize the split with custom percentages
+- **By amount**: Specify exact dollar amounts for each person
+
+### Group balances
+
+Each shared purchase generates a clear ledger showing who owes whom. Track balances across multiple expenses and settle up when ready.
+
+### Bank integration
+
+Integrate with Plaid to detect relevant transactions and create expense splits directly from your transaction history.
+
+## Real-world use cases
+
+<Info>
+Divvy is designed for the way groups actually split expenses in real life.
+</Info>
+
+### Splitting dinner bills
+
+Scan the restaurant receipt, assign menu items to each person, and Divvy automatically calculates each person's share including their portion of tax and tip.
+
+### Roommate expenses
+
+Create a group with your roommates to track shared expenses like groceries, utilities, and household supplies. See running balances of who owes what.
+
+### Group trips
+
+Travel with friends and track all shared expenses in one place. From hotels to meals to activities, Divvy keeps everything organized so you can settle up at the end.
+
+### One person covering for others
+
+Divvy supports scenarios where one person covers another's share upfront, ensuring flexibility for how your group actually pays.
+
+## Get started
+
+Ready to start splitting expenses with Divvy? Follow our [quickstart guide](/quickstart) to set up the app and create your first expense split.
+
+## Tech stack
+
+Divvy is built with modern Android development tools:
+
+- **Kotlin** with **Jetpack Compose** for the UI (MVVM architecture)
+- **Supabase** for database and authentication
+- **Plaid** for bank transaction detection
+- **CameraX** for receipt scanning
+- **Hilt** for dependency injection

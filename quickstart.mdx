@@ -1,80 +1,140 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get from zero to your first split expense in minutes
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
+Before you start, make sure you have:
 
-### Step 1: Set up your local environment
+- Android Studio installed (latest stable version recommended)
+- A Supabase account (sign up at [supabase.com](https://supabase.com))
+- An Android device or emulator running API level 26 or higher
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+## Get started
 
-### Step 2: Deploy your changes
+Follow these steps to run Divvy and create your first split expense.
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<Steps>
+  <Step title="Clone the repository">
+    Clone the Divvy repository to your local machine:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ```bash
+    git clone https://github.com/your-org/divvy.git
+    cd divvy
+    ```
+  </Step>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Configure Supabase credentials">
+    Create a `local.properties` file in the project root and add your Supabase credentials:
 
-### Step 3: Go live
+    ```properties
+    SUPABASE_URL=https://xxxx.supabase.co
+    SUPABASE_ANON_KEY=eyJ...
+    ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    <Warning>
+      Never commit `local.properties` to version control. This file contains your secret credentials.
+    </Warning>
 
-## Next steps
+    These values are read by the build system and injected as build config fields:
 
-Now that you have your docs running, explore these key features:
+    ```kotlin app/build.gradle.kts
+    val localProperties = Properties().apply {
+        val propsFile = rootProject.file("local.properties")
+        if (propsFile.exists()) {
+            propsFile.inputStream().use { load(it) }
+        }
+    }
+    val supabaseUrl = localProperties.getProperty("SUPABASE_URL", "")
+    val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY", "")
+    ```
+  </Step>
 
-<CardGroup cols={2}>
+  <Step title="Set up Supabase Auth">
+    In your Supabase dashboard:
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+    1. Navigate to **Authentication** > **Providers**
+    2. Enable **Google** as an authentication provider
+    3. Add `com.example.divvy://auth` as a redirect URL
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+    <Info>
+      This redirect URL allows Supabase to redirect back to the Divvy app after authentication.
+    </Info>
+  </Step>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+  <Step title="Open in Android Studio">
+    Open the project root directory in Android Studio and wait for Gradle to sync:
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+    1. Click **File** > **Open**
+    2. Select the `divvy` directory
+    3. Wait for Gradle sync to complete
 
-</CardGroup>
+    <Note>
+      The first sync may take a few minutes as Gradle downloads dependencies.
+    </Note>
+  </Step>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+  <Step title="Run the app">
+    Run the app configuration:
+
+    1. Select the `app` run configuration from the dropdown
+    2. Choose your target device or emulator
+    3. Click the **Run** button (or press `Shift + F10`)
+
+    The app will build and launch on your device. You'll see the authentication screen.
+  </Step>
+
+  <Step title="Create an account">
+    On the authentication screen:
+
+    1. Tap **Sign in with Google**
+    2. Choose your Google account
+    3. Grant the requested permissions
+
+    After authentication, you'll be redirected to the home screen.
+  </Step>
+
+  <Step title="Create your first group">
+    Groups organize who you split expenses with:
+
+    1. Tap the **Groups** tab in the bottom navigation
+    2. Tap the **+** button in the top right
+    3. Enter a group name (e.g., "Roommates")
+    4. Select an icon for your group
+    5. Search for and add members by email
+    6. Tap **Create Group**
+
+    <Info>
+      Members you add will receive an invitation to join the group.
+    </Info>
+  </Step>
+
+  <Step title="Split your first expense">
+    Now create your first expense split:
+
+    1. From the home screen, tap **Add Expense**
+    2. Select the group you just created
+    3. Enter the merchant name (e.g., "Whole Foods")
+    4. Enter the total amount
+    5. Choose a split method:
+       - **Equal**: Split evenly among all members
+       - **By item**: Scan a receipt to assign items
+       - **By percentage**: Custom percentage split
+       - **By amount**: Specify exact amounts
+    6. Tap **Create** to save the expense
+
+    The expense will appear in your group's ledger, and balances will update automatically.
+  </Step>
+</Steps>
+
+## What's next?
+
+Now that you've created your first expense split, you can:
+
+- **Scan receipts**: Use the camera to scan receipts and automatically extract items
+- **View balances**: Check the ledger to see who owes whom
+- **Settle up**: Mark expenses as paid when you collect from group members
+- **Track history**: View all past expenses in your groups
+
+For detailed development setup including database schema and API integrations, see the [installation guide](/installation).

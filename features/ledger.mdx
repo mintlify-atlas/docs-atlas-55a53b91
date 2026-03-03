@@ -1,0 +1,208 @@
+---
+title: Ledger
+description: Track all transactions, view balances, and understand who owes whom across your groups
+---
+
+## Overview
+
+The Ledger is your complete transaction history. It shows every expense and settlement across all your groups, helping you track money flow and understand your financial relationships.
+
+## Accessing the Ledger
+
+Navigate to the Ledger from the bottom navigation bar. The ledger icon provides quick access to your complete transaction log.
+
+## Net Balance
+
+At the top of the ledger, you'll see your overall net balance across all groups:
+
+<Tabs>
+  <Tab title="You are owed">
+    **Displayed in green** when your net balance is positive.
+    
+    This means you've paid more than your share across all expenses, and others owe you money overall.
+    
+    Example: **Net: you are owed $45.80**
+  </Tab>
+  
+  <Tab title="You owe">
+    **Displayed in red** when your net balance is negative.
+    
+    This means others have covered more than their share, and you owe money overall.
+    
+    Example: **Net: you owe $23.50**
+  </Tab>
+</Tabs>
+
+The net balance is calculated by summing all your individual group balances.
+
+## Transaction Types
+
+The ledger displays two types of entries:
+
+### Expenses
+
+Expenses represent purchases that were split among group members.
+
+**Visual indicators:**
+- Receipt icon on a blue circular background
+- Badge showing your relationship to the expense:
+  - **"You paid"** (green badge): You fronted this expense
+  - **"You owe"** (red badge): Someone else paid and you owe your share
+
+**Example entry:**
+```
+Dinner at Maple Bistro              $47.83
+Dec 15 · Paid by Alice              You owe
+```
+
+### Settlements
+
+Settlements are direct payments between members to settle balances.
+
+**Visual indicators:**
+- Swap/transfer icon on an amber circular background
+- Badge showing the direction:
+  - **"You sent"** (red badge): You sent money to settle a balance
+  - **"Received"** (green badge): You received a payment
+
+**Example entry:**
+```
+Payment: Alice → You                $25.00
+Dec 16 · Alice → You                Received
+```
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/ledger/Views/LedgerScreen.kt:315`
+
+## Filtering Transactions
+
+### By Type
+
+Filter transactions by type using the chip filters:
+
+- **All**: Show both expenses and settlements
+- **Expenses**: Show only split expenses
+- **Settlements**: Show only payments between members
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/ledger/Views/LedgerScreen.kt:193`
+
+### By Group
+
+Narrow down transactions to a specific group:
+
+1. Tap the **group filter dropdown**
+2. Select a group from the list (shows group icon and name)
+3. Ledger updates to show only that group's transactions
+4. Select **"All groups"** to view everything again
+
+The selected group appears as a chip with its icon for quick reference.
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/ledger/Views/LedgerScreen.kt:232`
+
+## Transaction Details
+
+Each ledger entry shows:
+
+### Top Row
+- **Title**: Expense description or settlement label
+- **Amount**: Total transaction amount
+
+### Second Row
+- **Date**: When the transaction occurred (e.g., "Dec 15")
+- **Participant info**:
+  - For expenses: "Paid by [name]"
+  - For settlements: "[payer] → [recipient]"
+- **Badge**: Your relationship ("You paid", "You owe", "You sent", "Received")
+
+### Third Row (if applicable)
+- **Group icon and name**: Which group this belongs to
+
+## Balance Calculation
+
+Balances are calculated automatically based on:
+
+1. **Expenses you created**: Others owe you their shares
+2. **Expenses you're part of**: You owe your share to whoever paid
+3. **Settlements sent**: Reduces what you owe
+4. **Settlements received**: Reduces what others owe you
+
+### Example Calculation
+
+```
+Starting balance: $0.00
+
++ Alice paid $60 dinner (you owe $20)     → You owe $20.00
++ You paid $30 groceries (Alice owes $10) → Net: You owe $10.00
++ You sent Alice $10                       → Net: $0.00 (settled)
+```
+
+## Settlement Workflow
+
+To settle a balance with someone:
+
+1. Go to the group detail screen
+2. Find the member you need to settle with
+3. Tap their member card to expand settlement options
+4. Choose a settlement type:
+   - **Paid Fully**: Mark the entire balance as paid
+   - **Paid Partially**: Enter a specific amount
+5. Tap **Confirm**
+
+A settlement entry is created in the ledger, updating both members' balances.
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/groupdetail/Views/GroupDetailScreen.kt:669`
+
+## Member Balances
+
+Within each group, member balances show:
+
+```kotlin
+data class MemberBalance(
+    val userId: String,
+    val name: String,
+    val balanceCents: Long  // positive = they owe you, negative = you owe them
+)
+```
+
+- **Positive balance**: They owe you money
+- **Negative balance**: You owe them money
+- **Zero balance**: Settled up
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/models/MemberBalance.kt:6`
+
+## Ledger Entry Model
+
+```kotlin
+enum class LedgerEntryType { EXPENSE, SETTLEMENT }
+
+data class LedgerEntry(
+    val id: String,
+    val type: LedgerEntryType,
+    val title: String,              // Expense description or settlement label
+    val amountCents: Long,          // Transaction amount in cents
+    val groupId: String,            // Associated group
+    val paidByUserId: String,       // Who initiated the transaction
+    val dateLabel: String,          // Formatted date (e.g., "Dec 15")
+    val toUserId: String,           // For settlements: recipient user ID
+    val splitMethod: String,        // For expenses: how it was split
+    val groupName: String,          // Group display name
+    val paidByName: String,         // Payer display name
+    val toName: String,             // Recipient display name (settlements)
+    val paidByCurrentUser: Boolean  // true if you initiated this
+)
+```
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/models/LedgerEntry.kt:8`
+
+## Transaction History
+
+Transactions are sorted chronologically (newest first). The ledger preserves a complete audit trail of all financial activity within your groups.
+
+## Empty State
+
+If no transactions match your filters, you'll see:
+
+- Checkmark icon
+- "No transactions found"
+- "Try adjusting your filters" hint
+
+This helps distinguish between an empty ledger and filtered-out results.

@@ -1,0 +1,314 @@
+---
+title: Installation
+description: Detailed setup guide for developers who want to run or modify Divvy
+---
+
+## Overview
+
+This guide walks you through setting up a complete development environment for Divvy, including building from the command line, configuring Supabase authentication, and understanding the project structure.
+
+## Prerequisites
+
+Ensure you have the following installed:
+
+- **Android Studio**: Latest stable version (Jellyfish or newer recommended)
+- **Java Development Kit (JDK)**: Version 8 or higher
+- **Gradle**: Included with Android Studio (no separate installation needed)
+- **Git**: For cloning the repository
+- **Supabase account**: For backend and authentication
+
+<Info>
+Divvy targets Android API level 26 (Android 8.0) and above, with a compile SDK of 36.
+</Info>
+
+## Installation steps
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the Divvy repository and navigate to the project directory:
+
+    ```bash
+    git clone https://github.com/your-org/divvy.git
+    cd divvy
+    ```
+  </Step>
+
+  <Step title="Configure local.properties">
+    Create a `local.properties` file in the project root directory:
+
+    ```bash
+    touch local.properties
+    ```
+
+    Add your Supabase credentials to this file:
+
+    ```properties local.properties
+    SUPABASE_URL=https://xxxx.supabase.co
+    SUPABASE_ANON_KEY=eyJ...
+    ```
+
+    <Warning>
+      **Important**: Never commit `local.properties` to version control. This file should only exist on your local machine and should be added to `.gitignore`.
+    </Warning>
+
+    ### How credentials are used
+
+    The build system reads these properties and injects them as BuildConfig fields that are accessible at runtime:
+
+    ```kotlin app/build.gradle.kts
+    val localProperties = Properties().apply {
+        val propsFile = rootProject.file("local.properties")
+        if (propsFile.exists()) {
+            propsFile.inputStream().use { load(it) }
+        }
+    }
+    val supabaseUrl = localProperties.getProperty("SUPABASE_URL", "")
+    val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY", "")
+
+    android {
+        buildTypes {
+            all {
+                buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+                buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+            }
+        }
+    }
+    ```
+
+    The Supabase client is initialized using these values in the `SupabaseClientProvider`:
+
+    ```kotlin app/src/main/java/com/example/divvy/backend/SupabaseClientProvider.kt
+    object SupabaseClientProvider {
+        @Volatile
+        private var clientInstance: SupabaseClient? = null
+
+        val client: SupabaseClient
+            get() = clientInstance
+                ?: error("SupabaseClient not initialised")
+
+        fun setClient(client: SupabaseClient) {
+            clientInstance = client
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Set up Supabase Authentication">
+    Configure Google authentication in your Supabase dashboard:
+
+    1. Go to your [Supabase Dashboard](https://app.supabase.com)
+    2. Select your project
+    3. Navigate to **Authentication** > **Providers**
+    4. Enable the **Google** provider
+    5. Add `com.example.divvy://auth` to the **Redirect URLs** list
+
+    ### How authentication works
+
+    Divvy uses Supabase GoTrue for authentication. The auth flow is handled by `AuthActivity`:
+
+    ```kotlin app/src/main/java/com/example/divvy/AuthActivity.kt
+    @AndroidEntryPoint
+    class AuthActivity : ComponentActivity() {
+        override fun onCreate(savedInstanceState: Bundle?) {
+            super.onCreate(savedInstanceState)
+            if (SupabaseClientProvider.isConfigured()) {
+                SupabaseClientProvider.client.handleDeeplinks(intent)
+            }
+            setContent {
+                DivvyTheme {
+                    AuthNav(
+                        onAuthenticated = {
+                            startActivity(Intent(this, MainActivity::class.java))
+                            finish()
+                        }
+                    )
+                }
+            }
+        }
+    }
+    ```
+
+    After successful authentication, the user is redirected to `MainActivity`.
+  </Step>
+
+  <Step title="Sync Gradle">
+    Open the project in Android Studio:
+
+    1. Launch Android Studio
+    2. Click **File** > **Open**
+    3. Select the `divvy` directory
+    4. Click **OK**
+    5. Wait for Gradle to sync automatically
+
+    If Gradle doesn't sync automatically, click **File** > **Sync Project with Gradle Files**.
+
+    <Note>
+      The first sync may take several minutes as Gradle downloads dependencies including Jetpack Compose, Supabase SDK, CameraX, and Hilt.
+    </Note>
+  </Step>
+
+  <Step title="Build from the command line">
+    You can build the app without Android Studio using Gradle:
+
+    ```bash
+    ./gradlew :app:assembleDebug
+    ```
+
+    This creates a debug APK at:
+
+    ```
+    app/build/outputs/apk/debug/app-debug.apk
+    ```
+
+    ### Other useful Gradle commands
+
+    ```bash
+    # Run tests
+    ./gradlew test
+
+    # Run lint checks
+    ./gradlew lint
+
+    # Clean build artifacts
+    ./gradlew clean
+
+    # Build release APK (requires signing configuration)
+    ./gradlew :app:assembleRelease
+    ```
+  </Step>
+
+  <Step title="Run the app">
+    Run the app on an emulator or physical device:
+
+    ### From Android Studio
+    1. Select the `app` run configuration from the dropdown
+    2. Choose your target device
+    3. Click the **Run** button (or press `Shift + F10`)
+
+    ### From command line
+    ```bash
+    # Install on connected device
+    ./gradlew installDebug
+
+    # Install and launch
+    ./gradlew installDebug
+    adb shell am start -n com.example.divvy/.AuthActivity
+    ```
+  </Step>
+</Steps>
+
+## Project structure
+
+Understanding the codebase organization:
+
+```
+divvy/
+├── app/
+│   ├── src/main/java/com/example/divvy/
+│   │   ├── backend/           # Data repositories and Supabase client
+│   │   ├── ui/                # Screens and navigation
+│   │   │   ├── auth/          # Authentication screens
+│   │   │   ├── groups/        # Group management
+│   │   │   ├── expenses/      # Expense creation and viewing
+│   │   │   ├── splitexpense/  # Expense splitting UI
+│   │   │   ├── scanreceipt/   # Receipt scanning with CameraX
+│   │   │   ├── home/          # Home feed and dashboard
+│   │   │   └── theme/         # Material 3 theme configuration
+│   │   ├── models/            # Domain models (Group, Expense, etc.)
+│   │   ├── MainActivity.kt    # Main app entry point
+│   │   └── AuthActivity.kt    # Authentication entry point
+│   └── build.gradle.kts       # App-level build configuration
+├── build.gradle.kts           # Project-level build configuration
+└── local.properties           # Local environment variables (not committed)
+```
+
+### Key files
+
+- **`app/build.gradle.kts`**: Defines dependencies, build types, and BuildConfig fields
+- **`backend/SupabaseClientProvider.kt`**: Singleton that provides the configured Supabase client
+- **`ui/MainScreen.kt`**: Root composable that sets up navigation and bottom bar
+- **`ui/navigation/AppNavHost.kt`**: Navigation graph for the app
+- **`models/`**: Data classes for Group, Expense, Split, and other domain objects
+
+## Development workflow
+
+Once you have the app running, you can:
+
+1. **Make code changes**: Edit Kotlin files in Android Studio
+2. **Hot reload**: Press `Ctrl + Shift + F9` to apply changes without restarting
+3. **Debug**: Set breakpoints and use Android Studio's debugger
+4. **View logs**: Use Logcat to see runtime logs from the app
+
+## Dependencies
+
+Divvy uses the following key dependencies:
+
+- **Jetpack Compose**: Modern declarative UI framework
+- **Supabase Kotlin SDK**: Backend and authentication (`postgrest-kt`, `gotrue-kt`)
+- **Hilt**: Dependency injection
+- **CameraX**: Camera functionality for receipt scanning
+- **Coil**: Image loading for user avatars
+- **Navigation Compose**: Type-safe navigation
+- **Material 3**: Material Design components
+
+View the complete list in `app/build.gradle.kts`.
+
+## Optional configuration
+
+### Auth bypass (for testing)
+
+You can bypass authentication during development by adding this to `local.properties`:
+
+```properties
+AUTH_BYPASS=true
+```
+
+This skips the login screen and goes directly to the main app:
+
+```kotlin app/src/main/java/com/example/divvy/AuthActivity.kt
+if (FeatureFlags.AUTH_BYPASS) {
+    startActivity(Intent(this, MainActivity::class.java))
+    finish()
+    return
+}
+```
+
+<Warning>
+Auth bypass should only be used for local development, never in production builds.
+</Warning>
+
+## Troubleshooting
+
+### Gradle sync fails
+
+If Gradle sync fails:
+
+1. Ensure `local.properties` exists and contains valid Supabase credentials
+2. Check that you're using JDK 8 or higher
+3. Try **File** > **Invalidate Caches** > **Invalidate and Restart**
+4. Run `./gradlew clean` and sync again
+
+### App crashes on launch
+
+If the app crashes immediately:
+
+1. Check Logcat for error messages
+2. Verify your Supabase URL and anon key are correct
+3. Ensure you've enabled Google auth in Supabase dashboard
+4. Check that the redirect URL `com.example.divvy://auth` is configured
+
+### Camera not working
+
+If receipt scanning doesn't work:
+
+1. Grant camera permissions when prompted
+2. Test on a physical device (emulator cameras have limitations)
+3. Check that CameraX dependencies are properly installed
+
+## Next steps
+
+Now that you have a complete development environment:
+
+- Review the [contributing guidelines](/contributing/setup) for contribution workflow
+- Explore the [API reference](/api/groups) to understand the data models
+- Check out [feature guides](/features/receipt-scanning) for implementation details

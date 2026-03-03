@@ -1,0 +1,131 @@
+---
+title: Groups
+description: Create and manage expense groups to organize shared costs with friends, roommates, and teams
+---
+
+## Overview
+
+Groups are the foundation of expense splitting in Divvy. Each group represents a shared space where members can track expenses, view balances, and settle up.
+
+## Creating a Group
+
+To create a new group:
+
+1. Tap the **Create Group** button from the Groups screen
+2. Enter a group name (e.g., "Roommates", "Weekend Trip")
+3. Choose an icon to represent your group
+4. Tap **Create** to finish
+
+You'll be automatically added as the group creator and can start adding members right away.
+
+## Group Icons
+
+Personalize your groups with custom icons. Choose from a variety of categories including:
+
+- Food & dining
+- Travel & vacation
+- Home & utilities
+- Entertainment
+- And many more
+
+Icons help you quickly identify groups at a glance in your group list.
+
+## Adding Members
+
+There are two ways to add members to your group:
+
+<Tabs>
+  <Tab title="Invite Link">
+    Share a deep link to invite members instantly:
+
+    1. Open your group details
+    2. Tap the menu icon (⋮) in the top right
+    3. Copy the invite link (`divvy.app/join/[group-id]`)
+    4. Share the link via text, email, or your preferred messaging app
+
+    When someone opens the link, they'll be added to the group automatically.
+  </Tab>
+  
+  <Tab title="Direct Invite">
+    Invite existing Divvy users directly:
+
+    1. Open your group details
+    2. Tap **Invite Members**
+    3. Search for users by name
+    4. Tap a user to send them an invite
+
+    Members will appear in the group once they accept.
+  </Tab>
+</Tabs>
+
+## Editing Group Details
+
+As the group creator, you can edit group information:
+
+1. Open the group from your Groups list
+2. Tap **Edit Group**
+3. Update the group name or icon
+4. Tap **Save Changes**
+
+<Note>
+All group members will see the updated name and icon immediately.
+</Note>
+
+## Viewing Member Balances
+
+The group detail screen shows a summary of balances for all members:
+
+- **Settled up**: The member's share is fully paid (balance = $0.00)
+- **Owes you**: The member owes money for expenses you covered
+- **You owe**: You owe money for expenses they covered
+
+Tap any member card to expand settlement options and mark payments.
+
+## Group Balance Summary
+
+At the top of each group, you'll see your overall balance:
+
+<CardGroup cols={2}>
+  <Card title="You are owed" icon="arrow-up" color="#10b981">
+    Displayed in green when you've paid more than your share of group expenses.
+  </Card>
+  <Card title="You owe" icon="arrow-down" color="#ef4444">
+    Displayed in red when others have covered more than their share.
+  </Card>
+</CardGroup>
+
+## Managing Groups
+
+Access group management options from the menu (⋮):
+
+- **Copy invite link**: Share with new members
+- **Leave group**: Remove yourself from the group
+- **Delete group** (creator only): Permanently delete the group and all its data
+
+<Warning>
+Deleting a group cannot be undone. All expenses, balances, and history will be permanently removed.
+</Warning>
+
+## Group Data Model
+
+Under the hood, each group contains:
+
+```kotlin
+data class Group(
+    val id: String,
+    val name: String,
+    val emoji: String,
+    val icon: GroupIcon,
+    val memberCount: Int,
+    val balanceCents: Long,      // Your net balance in this group
+    val currency: String,         // Default: "USD"
+    val createdBy: String         // User ID of creator
+)
+```
+
+**Key Properties:**
+- `balanceCents`: Positive values mean you're owed money, negative means you owe
+- `memberCount`: Total number of members including yourself
+- `icon`: Enum representing the visual icon (stored in `~/source/app/src/main/java/com/example/divvy/components/GroupIcon.kt`)
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/models/Group.kt:7`

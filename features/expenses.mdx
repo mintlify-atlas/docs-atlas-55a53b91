@@ -1,0 +1,133 @@
+---
+title: Expenses
+description: Add, track, and manage shared expenses within your groups
+---
+
+## Overview
+
+Expenses represent purchases or costs that need to be split among group members. Every expense records who paid, how much, and how it's divided.
+
+## Creating an Expense
+
+To add a new expense to a group:
+
+1. Open a group from your Groups list
+2. Tap **Add New Expense**
+3. Enter the total amount in dollars
+4. Add a description (e.g., "Dinner at Maple Bistro", "Groceries")
+5. Select who paid for the expense
+6. Choose a split method (see [Split Methods](/features/split-methods))
+7. Select which group to add it to
+8. Tap **Add expense** to save
+
+<Info>
+If you scanned a receipt, the amount and description will be pre-filled automatically.
+</Info>
+
+## Expense Fields
+
+Each expense includes:
+
+### Amount
+
+Enter the total cost in dollars and cents. The large currency input makes it easy to enter amounts quickly:
+
+```
+$ 47.50
+```
+
+The amount must be greater than $0.00 to create the expense.
+
+### Description
+
+A short label to identify the expense (e.g., merchant name, event, or category). If left blank, it defaults to "Expense".
+
+### Paid By
+
+Select who fronted the money for this purchase. Options include:
+
+- **You** (default)
+- Any other group member
+
+This determines who should be reimbursed.
+
+### Split Method
+
+Choose how to divide the cost among members. Three options are available:
+
+<CardGroup cols={3}>
+  <Card title="Split equally" icon="dollar-sign">
+    Everyone pays the same amount
+  </Card>
+  <Card title="By percentage" icon="percent">
+    Custom % for each person
+  </Card>
+  <Card title="By items" icon="list-check">
+    Assign items to people
+  </Card>
+</CardGroup>
+
+See [Split Methods](/features/split-methods) for detailed workflows.
+
+## Equal Split Preview
+
+When splitting equally, Divvy shows a live preview of the per-person amount:
+
+**Example:** $60.00 split among 3 people = **$20.00 each**
+
+The preview updates instantly as you change the total amount or add/remove members.
+
+## Group Selection
+
+If you belong to multiple groups, select which group this expense belongs to. Each group card shows:
+
+- Group icon
+- Group name
+- Selection indicator (checkmark when selected)
+
+You can only add an expense to one group at a time.
+
+## Editing Expenses
+
+<Note>
+Currently, expenses cannot be edited after creation. To correct an expense, delete it and create a new one.
+</Note>
+
+## Deleting Expenses
+
+Expense deletion is managed through the group activity feed. Contact your group admin if you need to remove an expense.
+
+## Expense Data Model
+
+Expenses are stored with the following structure:
+
+```kotlin
+data class Expense(
+    val id: String,
+    val groupId: String,
+    val merchant: String,           // Description/merchant name
+    val amountCents: Long,          // Total amount in cents
+    val splitMethod: String,        // "EQUAL", "PERCENTAGE", or "ITEMIZED"
+    val currency: String,           // Default: "USD"
+    val paidByUserId: String,       // Who paid upfront
+    val createdAt: String           // ISO timestamp
+)
+```
+
+**Key Details:**
+- Amounts are stored in cents to avoid floating-point precision issues
+- `splitMethod` determines how the expense is divided (see `~/workspace/source/app/src/main/java/com/example/divvy/ui/splitexpense/ViewModels/SplitExpenseViewModel.kt:27`)
+- Each expense is tied to exactly one group via `groupId`
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/models/Expense.kt:7`
+
+## Split Calculation
+
+When you create an expense, Divvy automatically:
+
+1. Calculates each person's share based on the split method
+2. Creates `Split` records for each member
+3. Updates group balances in real-time
+4. Posts an activity item to the group feed
+
+See [Ledger](/features/ledger) to understand how balances are calculated across expenses.

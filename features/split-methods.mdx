@@ -1,0 +1,219 @@
+---
+title: Split Methods
+description: Choose how to divide expenses among group members with flexible splitting options
+---
+
+## Overview
+
+Divvy supports three split methods to handle different types of shared expenses. Each method calculates member shares differently based on your needs.
+
+## Split Method Types
+
+When creating an expense, you'll choose one of these methods:
+
+<CardGroup cols={3}>
+  <Card title="Split equally" icon="dollar-sign">
+    Divide the cost evenly among all members.
+  </Card>
+  <Card title="By percentage" icon="percent">
+    Assign custom percentages to each person.
+  </Card>
+  <Card title="By items" icon="list-check">
+    Assign specific receipt items to individuals.
+  </Card>
+</CardGroup>
+
+## Equal Split
+
+The simplest method: divide the total equally among all group members.
+
+### When to Use
+
+- Group dinners where everyone shared equally
+- Utilities split among roommates
+- Shared groceries for a household
+- Event tickets for a group
+
+### How It Works
+
+1. Select **Split equally** when creating the expense
+2. The total is automatically divided by the number of members
+3. Each person owes the same amount
+
+**Example:**
+
+```
+Total: $60.00
+Members: 3 people (You, Alice, Bob)
+Per person: $20.00
+```
+
+### Live Preview
+
+Divvy shows a **Split preview** card that displays:
+
+- Each member's avatar and name
+- The calculated per-person amount
+- Updates in real-time as you change the total
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/splitexpense/Views/SplitExpenseScreen.kt:621`
+
+## Percentage Split
+
+Assign custom percentages to each person based on how much they should pay.
+
+### When to Use
+
+- Unequal income splits (e.g., 60/40 rent between partners)
+- Shared costs where one person uses more (utilities)
+- Splitting based on individual consumption
+- Variable contribution amounts
+
+### How It Works
+
+1. Select **By percentage** when creating the expense
+2. You'll navigate to the percentage assignment screen
+3. Enter a percentage for each member (must total 100%)
+4. Divvy calculates the dollar amount for each percentage
+
+**Example:**
+
+```
+Total: $100.00
+You: 50% → $50.00
+Alice: 30% → $30.00
+Bob: 20% → $20.00
+```
+
+### Percentage Screen
+
+The percentage split interface includes:
+
+- **Info card**: Shows the description and total amount
+- **Member chips**: Color-coded indicators for each person
+- **Progress bar**: Visual feedback showing total percentage (turns green at 100%)
+- **Per-member cards**: Enter percentage for each person with live dollar amount preview
+- **"Split evenly" button**: Quickly distribute 100% equally
+
+<Note>
+The **Done** button is disabled until percentages total exactly 100%.
+</Note>
+
+### Validation
+
+The progress bar changes color based on your input:
+
+- **Blue**: Below 100% (incomplete)
+- **Red**: Above 100% (invalid)
+- **Green**: Exactly 100% (ready to save)
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/splitpercentage/Views/SplitByPercentageScreen.kt:230`
+
+## Itemized Split
+
+Assign individual receipt items to specific people for maximum flexibility.
+
+### When to Use
+
+- Restaurant bills where people ordered different items
+- Grocery runs where housemates bought different things
+- Shared orders with varying individual contributions
+- Receipts with distinct line items
+
+### How It Works
+
+1. Select **By items** when creating the expense
+2. Scan a receipt or manually enter items
+3. Tap each item to assign it to one or more people
+4. Items can be assigned to multiple people (cost is split among assignees)
+
+**Example:**
+
+```
+Total: $47.83
+Items:
+  - Burger ($15.00) → Assigned to You
+  - Pizza ($18.00) → Assigned to Alice
+  - Salad ($12.00) → Assigned to Bob
+  - Fries ($2.83) → Assigned to You, Alice, Bob (split 3 ways)
+```
+
+### Assignment Screen
+
+The itemized assignment interface shows:
+
+- **Store info card**: Receipt total and merchant name
+- **Member chips**: Color-coded tags for each person
+- **Item cards**: Tap to expand and assign members
+  - Item name and price
+  - Currently assigned members (avatars)
+  - "Not assigned" state for unassigned items
+- **Member selection**: Toggle chips to assign/unassign
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/assignitems/Views/AssignItemsScreen.kt:227`
+
+### Multiple Assignees
+
+When an item is assigned to multiple people:
+
+- The item cost is divided equally among them
+- Example: $12.00 fries assigned to 3 people = $4.00 each
+
+## Tax and Tip Distribution
+
+For itemized splits, tax and tip are handled differently:
+
+- **Automatic**: Tax/tip amounts are distributed proportionally based on each person's subtotal
+- **Manual**: Add tax/tip as separate line items and assign them accordingly
+
+<Info>
+Future versions will support automatic tax/tip calculation. Currently, include them in item prices or add as separate items.
+</Info>
+
+## Changing Split Methods
+
+You can change the split method before creating an expense:
+
+1. Tap the **Split** dropdown
+2. Select a different method
+3. The UI updates to show the new splitting workflow
+
+<Warning>
+You cannot change the split method after an expense is created. Delete and recreate the expense if needed.
+</Warning>
+
+## Split Method Storage
+
+Each expense stores its split method:
+
+```kotlin
+enum class SplitMethod(val title: String, val subtitle: String) {
+    Equally("Split equally", "Everyone pays the same"),
+    ByPercentage("By percentage", "Custom % for each person"),
+    ByItems("By items", "Assign items to people")
+}
+```
+
+In the database, split methods are stored as:
+
+- `"EQUAL"` - Equal split
+- `"PERCENTAGE"` - Percentage split
+- `"ITEMIZED"` - Itemized split
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/splitexpense/ViewModels/SplitExpenseViewModel.kt:27`
+
+## Split Records
+
+Regardless of method, each expense creates `Split` records:
+
+```kotlin
+data class Split(
+    val userId: String,           // Who owes this portion
+    val amountCents: Long,        // How much they owe (in cents)
+    val coveredByUserId: String?  // Who paid (null = they paid for themselves)
+)
+```
+
+These splits are used to calculate balances in the [Ledger](/features/ledger).
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/models/Split.kt:6`

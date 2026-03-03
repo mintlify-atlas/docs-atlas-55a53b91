@@ -1,0 +1,187 @@
+---
+title: 'LedgerEntry'
+description: 'Data model for tracking financial transactions between group members'
+---
+
+The `LedgerEntry` model represents a financial transaction in a group's ledger. It tracks both expenses and settlements, recording who paid whom and for what amount.
+
+## Data Class Definition
+
+```kotlin LedgerEntry.kt
+package com.example.divvy.models
+
+import kotlinx.serialization.Serializable
+
+enum class LedgerEntryType { EXPENSE, SETTLEMENT }
+
+@Serializable
+data class LedgerEntry(
+    val id: String,
+    val type: LedgerEntryType,
+    val title: String,
+    val amountCents: Long,
+    val groupId: String,
+    val paidByUserId: String,
+    val dateLabel: String,
+    val toUserId: String = "",
+    val splitMethod: String = "",
+    val groupName: String = "",
+    val paidByName: String = "",
+    val toName: String = "",
+    val paidByCurrentUser: Boolean = false
+)
+```
+
+Source: LedgerEntry.kt
+
+## LedgerEntryType Enum
+
+```kotlin
+enum class LedgerEntryType { EXPENSE, SETTLEMENT }
+```
+
+Source: LedgerEntry.kt
+
+- **EXPENSE**: Represents a shared expense that was split among group members
+- **SETTLEMENT**: Represents a direct payment from one user to another to settle debts
+
+## Fields
+
+<ParamField path="id" type="String" required>
+  Unique identifier for the ledger entry
+</ParamField>
+
+<ParamField path="type" type="LedgerEntryType" required>
+  Type of transaction: `EXPENSE` or `SETTLEMENT`
+</ParamField>
+
+<ParamField path="title" type="String" required>
+  Description of the transaction (e.g., "Grocery Store", "Payment to Sarah")
+</ParamField>
+
+<ParamField path="amountCents" type="Long" required>
+  Transaction amount in cents
+</ParamField>
+
+<ParamField path="groupId" type="String" required>
+  ID of the group this ledger entry belongs to
+</ParamField>
+
+<ParamField path="paidByUserId" type="String" required>
+  User ID of the person who made the payment
+</ParamField>
+
+<ParamField path="dateLabel" type="String" required>
+  Human-readable date label (e.g., "Today", "Yesterday", "Mar 1")
+</ParamField>
+
+<ParamField path="toUserId" type="String" default='""'>
+  For settlements, the user ID of the person receiving the payment. Empty for expenses.
+</ParamField>
+
+<ParamField path="splitMethod" type="String" default='""'>
+  For expenses, the method used to split the cost (e.g., "EQUAL", "PERCENTAGE"). Empty for settlements.
+</ParamField>
+
+<ParamField path="groupName" type="String" default='""'>
+  Name of the group (denormalized for display purposes)
+</ParamField>
+
+<ParamField path="paidByName" type="String" default='""'>
+  Display name of the user who paid (denormalized for display purposes)
+</ParamField>
+
+<ParamField path="toName" type="String" default='""'>
+  Display name of the user who received payment in a settlement (denormalized for display purposes)
+</ParamField>
+
+<ParamField path="paidByCurrentUser" type="Boolean" default="false">
+  Whether the current user made this payment
+</ParamField>
+
+## Usage Examples
+
+### Expense Ledger Entry
+
+```kotlin
+val expenseLedger = LedgerEntry(
+    id = "ledger_123",
+    type = LedgerEntryType.EXPENSE,
+    title = "Grocery Store",
+    amountCents = 8599L, // $85.99
+    groupId = "grp_456",
+    paidByUserId = "user_abc",
+    dateLabel = "Today",
+    splitMethod = "EQUAL",
+    groupName = "Roommates",
+    paidByName = "Sarah",
+    paidByCurrentUser = true
+)
+```
+
+### Settlement Ledger Entry
+
+```kotlin
+val settlementLedger = LedgerEntry(
+    id = "ledger_789",
+    type = LedgerEntryType.SETTLEMENT,
+    title = "Payment to Alex",
+    amountCents = 2500L, // $25.00
+    groupId = "grp_456",
+    paidByUserId = "user_abc",
+    dateLabel = "Yesterday",
+    toUserId = "user_def",
+    groupName = "Roommates",
+    paidByName = "Sarah",
+    toName = "Alex",
+    paidByCurrentUser = true
+)
+```
+
+## Related Models
+
+### ActivityItem
+
+A simplified model for displaying activity feed items:
+
+```kotlin ActivityItem.kt
+@Serializable
+data class ActivityItem(
+    val id: String,
+    val title: String,
+    val amountCents: Long,
+    val dateLabel: String,       // e.g. "Today", "Yesterday"
+    val paidByLabel: String,     // e.g. "You", "Sarah"
+    val paidByCurrentUser: Boolean,
+    val timestamp: String
+)
+```
+
+Source: [ActivityItem.kt:6]
+
+The `ActivityItem` model is a simpler representation used in activity feeds, while `LedgerEntry` contains more detailed transaction information.
+
+## Relationships
+
+- **Group**: Each ledger entry belongs to a [Group](group) via `groupId`
+- **User**: The `paidByUserId` and `toUserId` fields reference [UserProfile](user-profile) IDs
+- **Expense**: Expense-type ledger entries are derived from [Expense](expense) or GroupExpense records
+
+## Use Cases
+
+### Transaction History
+
+Ledger entries provide a complete audit trail of all financial transactions within a group:
+- Who paid for what expenses
+- Who settled debts with whom
+- When transactions occurred
+
+### Balance Calculation
+
+Ledger entries are used to calculate member balances:
+- Expenses increase what others owe the payer
+- Settlements reduce outstanding debts between members
+
+### Activity Feed
+
+The denormalized fields (`groupName`, `paidByName`, `toName`) allow ledger entries to be displayed in activity feeds without additional database lookups.

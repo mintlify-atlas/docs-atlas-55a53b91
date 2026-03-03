@@ -1,0 +1,738 @@
+---
+title: ExpensesRepository
+description: Repository for managing expenses, splits, and expense tracking in Divvy
+---
+
+## Overview
+
+`ExpensesRepository` handles all expense-related operations including creating expenses with splits, updating existing expenses, and tracking expenses across groups.
+
+**Interface**: `backend/ExpensesRepository.kt:15`  
+**Implementation**: `backend/SupabaseExpensesRepository.kt:21`
+
+## Interface Definition
+
+```kotlin
+interface ExpensesRepository {
+    suspend fun listExpenses(): List<Expense>
+    suspend fun listExpensesByGroup(groupId: String): List<Expense>
+    suspend fun listGroupExpenses(groupId: String): List<GroupExpense>
+    suspend fun createExpense(
+        groupId: String,
+        description: String,
+        amountCents: Long,
+        splitMethod: String
+    ): Expense
+    suspend fun createExpenseWithSplits(
+        groupId: String,
+        description: String,
+        amountCents: Long,
+        currency: String,
+        splitMethod: String,
+        splits: List<ExpenseSplit>
+    ): GroupExpense
+    suspend fun getExpenseById(expenseId: String): Expense?
+    suspend fun getGroupExpenseById(expenseId: String): GroupExpense?
+    suspend fun updateExpense(
+        expenseId: String,
+        groupId: String,
+        description: String,
+        amountCents: Long,
+        splitMethod: String,
+        currency: String
+    ): Expense
+    suspend fun updateExpenseSplits(expenseId: String, splits: List<ExpenseSplit>)
+    suspend fun deleteExpense(expenseId: String)
+    fun observeGroupExpenses(groupId: String): Flow<List<GroupExpense>>
+    fun observeAllGroupExpenses(): Flow<List<GroupExpense>>
+    suspend fun refreshGroupExpenses(groupId: String)
+    suspend fun refreshAllExpenses()
+}
+```
+
+## Implementation
+
+### SupabaseExpensesRepository
+
+```kotlin
+@Singleton
+class SupabaseExpensesRepository @Inject constructor(
+    private val supabaseClient: SupabaseClient,
+    private val authRepository: AuthRepository
+) : ExpensesRepository {
+    private val _expenses = MutableStateFlow<Map<String, List<GroupExpense>>>(emptyMap())
+}
+```
+
+The repository caches expenses by group ID for efficient reactive updates.
+
+## Basic Expense Methods
+
+### listExpenses
+
+Fetches all expenses from the database.
+
+```kotlin
+suspend fun listExpenses(): List<Expense>
+```
+
+**Returns**: `List<Expense>` - All expenses in the system
+
+**Supabase Query**:
+
+```kotlin
+override suspend fun listExpenses(): List<Expense> =
+    supabaseClient.from("expenses").select().decodeList()
+```
+
+---
+
+### listExpensesByGroup
+
+Fetches all expenses for a specific group.
+
+```kotlin
+suspend fun listExpensesByGroup(groupId: String): List<Expense>
+```
+
+<ParamField path="groupId" type="String" required>
+  The ID of the group to fetch expenses for
+</ParamField>
+
+**Returns**: `List<Expense>` - All expenses in the specified group
+
+**Example Usage**:
+
+```kotlin
+val expenses = expensesRepository.listExpensesByGroup("group-123")
+expenses.forEach { expense ->
+    println("${expense.merchant}: $${expense.amountCents / 100.0}")
+}
+```
+
+**Supabase Query**:
+
+```kotlin
+override suspend fun listExpensesByGroup(groupId: String): List<Expense> =
+    supabaseClient.from("expenses")
+        .select { filter { eq("group_id", groupId) } }
+        .decodeList()
+```
+
+---
+
+### listGroupExpenses
+
+Fetches expenses with their splits for a specific group.
+
+```kotlin
+suspend fun listGroupExpenses(groupId: String): List<GroupExpense>
+```
+
+<ParamField path="groupId" type="String" required>
+  The ID of the group to fetch expenses for
+</ParamField>
+
+**Returns**: `List<GroupExpense>` - Expenses with split information
+
+**Supabase Query**:
+
+```kotlin
+override suspend fun listGroupExpenses(groupId: String): List<GroupExpense> =
+    supabaseClient.from("group_expenses_with_splits")
+        .select { filter { eq("group_id", groupId) } }
+        .decodeList()
+```
+
+**Database View**: Uses `group_expenses_with_splits` view that joins expenses with their splits
+
+---
+
+### getExpenseById
+
+Fetches a single expense by ID.
+
+```kotlin
+suspend fun getExpenseById(expenseId: String): Expense?
+```
+
+<ParamField path="expenseId" type="String" required>
+  The unique identifier of the expense
+</ParamField>
+
+**Returns**: `Expense?` - The expense or null if not found
+
+**Supabase Query**:
+
+```kotlin
+override suspend fun getExpenseById(expenseId: String): Expense? =
+    supabaseClient.from("expenses")
+        .select { filter { eq("id", expenseId) } }
+        .decodeSingleOrNull()
+```
+
+---
+
+### getGroupExpenseById
+
+Fetches a single expense with its splits.
+
+```kotlin
+suspend fun getGroupExpenseById(expenseId: String): GroupExpense?
+```
+
+<ParamField path="expenseId" type="String" required>
+  The unique identifier of the expense
+</ParamField>
+
+**Returns**: `GroupExpense?` - The expense with splits or null if not found
+
+**Supabase Implementation**:
+
+```kotlin
+override suspend fun getGroupExpenseById(expenseId: String): GroupExpense? {
+    val expense = getExpenseById(expenseId) ?: return null
+    val splits = supabaseClient.from("expense_splits")
+        .select { filter { eq("expense_id", expenseId) } }
+        .decodeList<ExpenseSplit>()
+    return GroupExpense(
+        id = expense.id,
+        groupId = expense.groupId,
+        title = expense.merchant,
+        amountCents = expense.amountCents,
+        paidByUserId = expense.paidByUserId,
+        splits = splits,
+        createdAt = expense.createdAt
+    )
+}
+```
+
+## Creating Expenses
+
+### createExpense
+
+Creates a basic expense without custom splits.
+
+```kotlin
+suspend fun createExpense(
+    groupId: String,
+    description: String,
+    amountCents: Long,
+    splitMethod: String
+): Expense
+```
+
+<ParamField path="groupId" type="String" required>
+  The group this expense belongs to
+</ParamField>
+
+<ParamField path="description" type="String" required>
+  The merchant or description of the expense
+</ParamField>
+
+<ParamField path="amountCents" type="Long" required>
+  The total amount in cents (e.g., 1000 = $10.00)
+</ParamField>
+
+<ParamField path="splitMethod" type="String" required>
+  How to split the expense: "EQUAL", "PERCENTAGE", or "EXACT"
+</ParamField>
+
+**Returns**: `Expense` - The created expense
+
+**Example Usage**:
+
+```kotlin
+val expense = expensesRepository.createExpense(
+    groupId = "group-123",
+    description = "Dinner at Restaurant",
+    amountCents = 5000, // $50.00
+    splitMethod = "EQUAL"
+)
+```
+
+**Supabase Implementation**:
+
+```kotlin
+override suspend fun createExpense(
+    groupId: String,
+    description: String,
+    amountCents: Long,
+    splitMethod: String
+): Expense {
+    val expense = Expense(
+        groupId = groupId,
+        merchant = description,
+        amountCents = amountCents,
+        splitMethod = splitMethod,
+        currency = "USD",
+        paidByUserId = authRepository.getCurrentUserId()
+    )
+    return supabaseClient.from("expenses")
+        .insert(expense) { select() }
+        .decodeSingle()
+}
+```
+
+---
+
+### createExpenseWithSplits
+
+Creates an expense with custom split amounts for each member.
+
+```kotlin
+suspend fun createExpenseWithSplits(
+    groupId: String,
+    description: String,
+    amountCents: Long,
+    currency: String,
+    splitMethod: String,
+    splits: List<ExpenseSplit>
+): GroupExpense
+```
+
+<ParamField path="groupId" type="String" required>
+  The group this expense belongs to
+</ParamField>
+
+<ParamField path="description" type="String" required>
+  The merchant or description of the expense
+</ParamField>
+
+<ParamField path="amountCents" type="Long" required>
+  The total amount in cents
+</ParamField>
+
+<ParamField path="currency" type="String" required>
+  Currency code (e.g., "USD", "EUR")
+</ParamField>
+
+<ParamField path="splitMethod" type="String" required>
+  Split method: "EQUAL", "PERCENTAGE", "EXACT"
+</ParamField>
+
+<ParamField path="splits" type="List<ExpenseSplit>" required>
+  List of split allocations for each member
+</ParamField>
+
+**Returns**: `GroupExpense` - The created expense with splits
+
+**Example Usage**:
+
+```kotlin
+val splits = listOf(
+    ExpenseSplit(userId = "user-1", amountCents = 2000), // $20.00
+    ExpenseSplit(userId = "user-2", amountCents = 3000)  // $30.00
+)
+
+val expense = expensesRepository.createExpenseWithSplits(
+    groupId = "group-123",
+    description = "Groceries",
+    amountCents = 5000,
+    currency = "USD",
+    splitMethod = "EXACT",
+    splits = splits
+)
+```
+
+**Supabase Implementation**:
+
+```kotlin
+override suspend fun createExpenseWithSplits(
+    groupId: String,
+    description: String,
+    amountCents: Long,
+    currency: String,
+    splitMethod: String,
+    splits: List<ExpenseSplit>
+): GroupExpense {
+    val params = buildJsonObject {
+        put("p_group_id", groupId)
+        put("p_merchant", description)
+        put("p_amount_cents", amountCents)
+        put("p_currency", currency)
+        put("p_split_method", splitMethod)
+        put("p_paid_by", authRepository.getCurrentUserId())
+        putJsonArray("p_splits") {
+            splits.forEach { split ->
+                add(buildJsonObject {
+                    put("user_id", split.userId)
+                    put("amount_cents", split.amountCents)
+                    split.isCoveredBy?.let { put("is_covered_by", it) }
+                })
+            }
+        }
+    }
+
+    val expenseId = supabaseClient.postgrest
+        .rpc("create_expense_with_splits", params)
+        .decodeAs<String>()
+
+    val groupExpense = getGroupExpenseById(expenseId)
+        ?: error("Failed to fetch expense after creation: $expenseId")
+
+    // Update local cache
+    _expenses.update { map ->
+        map + (groupId to ((map[groupId] ?: emptyList()) + groupExpense))
+    }
+    
+    return groupExpense
+}
+```
+
+**RPC Function**: `create_expense_with_splits` - Atomically creates expense and splits
+
+## Updating Expenses
+
+### updateExpense
+
+Updates an expense's basic properties.
+
+```kotlin
+suspend fun updateExpense(
+    expenseId: String,
+    groupId: String,
+    description: String,
+    amountCents: Long,
+    splitMethod: String,
+    currency: String
+): Expense
+```
+
+<ParamField path="expenseId" type="String" required>
+  The ID of the expense to update
+</ParamField>
+
+<ParamField path="groupId" type="String" required>
+  The group ID (can be changed to move expense)
+</ParamField>
+
+<ParamField path="description" type="String" required>
+  Updated description/merchant
+</ParamField>
+
+<ParamField path="amountCents" type="Long" required>
+  Updated amount in cents
+</ParamField>
+
+<ParamField path="splitMethod" type="String" required>
+  Updated split method
+</ParamField>
+
+<ParamField path="currency" type="String" required>
+  Updated currency code
+</ParamField>
+
+**Returns**: `Expense` - The updated expense
+
+**Supabase Implementation**:
+
+```kotlin
+override suspend fun updateExpense(
+    expenseId: String,
+    groupId: String,
+    description: String,
+    amountCents: Long,
+    splitMethod: String,
+    currency: String
+): Expense =
+    supabaseClient.from("expenses")
+        .update({
+            set("group_id", groupId)
+            set("merchant", description)
+            set("amount_cents", amountCents)
+            set("split_method", splitMethod)
+            set("currency", currency)
+        }) {
+            select()
+            filter { eq("id", expenseId) }
+        }
+        .decodeSingle()
+```
+
+---
+
+### updateExpenseSplits
+
+Updates the split allocations for an expense.
+
+```kotlin
+suspend fun updateExpenseSplits(expenseId: String, splits: List<ExpenseSplit>)
+```
+
+<ParamField path="expenseId" type="String" required>
+  The ID of the expense to update splits for
+</ParamField>
+
+<ParamField path="splits" type="List<ExpenseSplit>" required>
+  New split allocations
+</ParamField>
+
+**Example Usage**:
+
+```kotlin
+val newSplits = listOf(
+    ExpenseSplit(userId = "user-1", amountCents = 1500),
+    ExpenseSplit(userId = "user-2", amountCents = 3500)
+)
+
+expensesRepository.updateExpenseSplits(
+    expenseId = "expense-123",
+    splits = newSplits
+)
+```
+
+**Supabase Implementation**:
+
+```kotlin
+override suspend fun updateExpenseSplits(expenseId: String, splits: List<ExpenseSplit>) {
+    val params = buildJsonObject {
+        put("p_expense_id", expenseId)
+        putJsonArray("p_splits") {
+            splits.forEach { split ->
+                add(buildJsonObject {
+                    put("user_id", split.userId)
+                    put("amount_cents", split.amountCents)
+                    split.isCoveredBy?.let { put("is_covered_by", it) }
+                })
+            }
+        }
+    }
+    supabaseClient.postgrest.rpc("update_expense_splits", params)
+}
+```
+
+**RPC Function**: `update_expense_splits` - Replaces all splits for an expense
+
+---
+
+### deleteExpense
+
+Deletes an expense and all its splits.
+
+```kotlin
+suspend fun deleteExpense(expenseId: String)
+```
+
+<ParamField path="expenseId" type="String" required>
+  The ID of the expense to delete
+</ParamField>
+
+**Supabase Implementation**:
+
+```kotlin
+override suspend fun deleteExpense(expenseId: String) {
+    supabaseClient.from("expenses")
+        .delete { filter { eq("id", expenseId) } }
+}
+```
+
+## Reactive Observations
+
+### observeGroupExpenses
+
+Returns a Flow of expenses for a specific group.
+
+```kotlin
+fun observeGroupExpenses(groupId: String): Flow<List<GroupExpense>>
+```
+
+<ParamField path="groupId" type="String" required>
+  The group ID to observe expenses for
+</ParamField>
+
+**Returns**: `Flow<List<GroupExpense>>` - Stream of expense updates
+
+**Example Usage**:
+
+```kotlin
+val expenses = expensesRepository.observeGroupExpenses("group-123")
+    .collectAsState(initial = emptyList())
+```
+
+**Implementation**:
+
+```kotlin
+override fun observeGroupExpenses(groupId: String): Flow<List<GroupExpense>> =
+    _expenses.map { it[groupId] ?: emptyList() }
+```
+
+---
+
+### observeAllGroupExpenses
+
+Returns a Flow of all expenses across all groups.
+
+```kotlin
+fun observeAllGroupExpenses(): Flow<List<GroupExpense>>
+```
+
+**Returns**: `Flow<List<GroupExpense>>` - Stream of all expenses
+
+**Implementation**:
+
+```kotlin
+override fun observeAllGroupExpenses(): Flow<List<GroupExpense>> =
+    _expenses.map { it.values.flatten() }
+```
+
+---
+
+### refreshGroupExpenses
+
+Forces a refresh of expenses for a specific group.
+
+```kotlin
+suspend fun refreshGroupExpenses(groupId: String)
+```
+
+<ParamField path="groupId" type="String" required>
+  The group ID to refresh expenses for
+</ParamField>
+
+**Implementation**:
+
+```kotlin
+override suspend fun refreshGroupExpenses(groupId: String) {
+    val expenses = listGroupExpenses(groupId)
+    _expenses.update { it + (groupId to expenses) }
+}
+```
+
+---
+
+### refreshAllExpenses
+
+Forces a refresh of all expenses.
+
+```kotlin
+suspend fun refreshAllExpenses()
+```
+
+**Implementation**:
+
+```kotlin
+override suspend fun refreshAllExpenses() {
+    try {
+        val all = supabaseClient.from("group_expenses_with_splits")
+            .select()
+            .decodeList<GroupExpense>()
+        _expenses.value = all.groupBy { it.groupId }
+    } catch (_: Exception) { }
+}
+```
+
+## Data Models
+
+### Expense
+
+Source: `models/Expense.kt:7`
+
+```kotlin
+@Serializable
+data class Expense(
+    val id: String = "",
+    @SerialName("group_id")        val groupId: String = "",
+    val merchant: String = "",
+    @SerialName("amount_cents")    val amountCents: Long = 0L,
+    @SerialName("split_method")    val splitMethod: String = "EQUAL",
+    val currency: String = "USD",
+    @SerialName("paid_by_user_id") val paidByUserId: String = "",
+    @SerialName("created_at")      val createdAt: String = ""
+)
+```
+
+### ExpenseSplit
+
+Source: `models/GroupExpense.kt:8`
+
+```kotlin
+@Serializable
+data class ExpenseSplit(
+    @SerialName("user_id")       val userId: String,
+    @SerialName("amount_cents")  val amountCents: Long,
+    @SerialName("is_covered_by") val isCoveredBy: String? = null
+)
+```
+
+**Fields**:
+- `userId`: The member this split belongs to
+- `amountCents`: This member's share of the expense
+- `isCoveredBy`: Optional user ID if someone is covering this member's share
+
+### GroupExpense
+
+Source: `models/GroupExpense.kt:15`
+
+```kotlin
+@Serializable
+data class GroupExpense(
+    val id: String,
+    @SerialName("group_id")          val groupId: String,
+    val title: String,
+    @SerialName("amount_cents")      val amountCents: Long,
+    @SerialName("paid_by_user_id")   val paidByUserId: String,
+    val splits: List<ExpenseSplit> = emptyList(),
+    @SerialName("created_at")        val createdAt: String
+)
+```
+
+## Split Calculation Utilities
+
+Source: `models/GroupExpense.kt:30`
+
+### splitEqually
+
+Divides an amount evenly across users:
+
+```kotlin
+fun splitEqually(amountCents: Long, userIds: List<String>): List<ExpenseSplit>
+```
+
+**Example**:
+
+```kotlin
+val splits = splitEqually(5000, listOf("user-1", "user-2", "user-3"))
+// Result: [1667, 1667, 1666] cents
+```
+
+### splitByPercentage
+
+Divides an amount by percentage shares:
+
+```kotlin
+fun splitByPercentage(amountCents: Long, percentages: Map<String, Double>): List<ExpenseSplit>
+```
+
+**Example**:
+
+```kotlin
+val splits = splitByPercentage(10000, mapOf(
+    "user-1" to 40.0,  // 40%
+    "user-2" to 60.0   // 60%
+))
+// Result: user-1 = 4000, user-2 = 6000
+```
+
+## Error Handling
+
+All suspend functions may throw exceptions:
+
+```kotlin
+try {
+    val expense = expensesRepository.createExpenseWithSplits(...)
+} catch (e: Exception) {
+    when {
+        e.message?.contains("balance") == true -> 
+            showError("Split amounts don't match total")
+        else -> 
+            showError("Failed to create expense: ${e.message}")
+    }
+}
+```
+
+## See Also
+
+- [Repository Pattern Overview](/repositories/overview)
+- [GroupRepository](/repositories/group-repository)
+- [Expense Data Model](/models/expense)

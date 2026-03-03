@@ -1,0 +1,251 @@
+---
+title: Repository Pattern Overview
+description: Learn about Divvy's repository pattern for data access, error handling, and dependency injection
+---
+
+## Overview
+
+Divvy uses the **Repository Pattern** to abstract data access logic from the UI and business logic layers. All repositories follow a consistent interface-based design with Supabase implementations.
+
+## Architecture
+
+### Interface-Based Abstractions
+
+Each repository is defined as a Kotlin interface that declares the contract for data operations:
+
+```kotlin
+interface GroupRepository {
+    fun listGroups(): Flow<DataResult<List<Group>>>
+    fun getGroup(groupId: String): Flow<Group>
+    suspend fun createGroup(name: String, icon: GroupIcon): Group
+    suspend fun updateGroup(groupId: String, name: String, icon: GroupIcon)
+    suspend fun deleteGroup(groupId: String)
+    suspend fun refreshGroups()
+}
+```
+
+### Supabase Implementations
+
+Each interface has a corresponding Supabase implementation:
+
+- `GroupRepository` → `SupabaseGroupRepository`
+- `ExpensesRepository` → `SupabaseExpensesRepository`
+- `AuthRepository` → `SupabaseAuthRepository`
+- `ProfilesRepository` → `SupabaseProfilesRepository`
+
+Implementations are marked with `@Singleton` and injected via Hilt:
+
+```kotlin
+@Singleton
+class SupabaseGroupRepository @Inject constructor(
+    private val supabaseClient: SupabaseClient
+) : GroupRepository {
+    // Implementation...
+}
+```
+
+## DataResult Wrapper
+
+Divvy uses a `DataResult` sealed class to handle loading states, success, and errors uniformly across the app.
+
+### Definition
+
+Source: `backend/DataResult.kt:3`
+
+```kotlin
+sealed class DataResult<out T> {
+    data class Success<T>(val data: T) : DataResult<T>()
+    data class Error(val message: String, val cause: Throwable? = null) : DataResult<Nothing>()
+    data object Loading : DataResult<Nothing>()
+}
+```
+
+### Usage Pattern
+
+Repositories return `DataResult` for operations that may fail:
+
+```kotlin
+val groups: Flow<DataResult<List<Group>>> = groupRepository.listGroups()
+
+groups.collect { result ->
+    when (result) {
+        is DataResult.Loading -> showLoadingSpinner()
+        is DataResult.Success -> displayGroups(result.data)
+        is DataResult.Error -> showError(result.message)
+    }
+}
+```
+
+## Error Handling
+
+### Try-Catch Pattern
+
+Repository implementations wrap Supabase calls in try-catch blocks:
+
+```kotlin
+override suspend fun refreshGroups() {
+    try {
+        val rows = supabaseClient.postgrest
+            .rpc("get_my_groups_summary")
+            .decodeList<GroupSummaryRow>()
+        
+        _groups.value = DataResult.Success(rows.map { /* ... */ })
+    } catch (e: Exception) {
+        _groups.value = DataResult.Error("Failed to load groups", e)
+    }
+}
+```
+
+### Error States
+
+Repositories maintain internal `MutableStateFlow` with `DataResult` states:
+
+```kotlin
+private val _groups = MutableStateFlow<DataResult<List<Group>>>(DataResult.Loading)
+
+override fun listGroups(): Flow<DataResult<List<Group>>> = _groups
+```
+
+## Dependency Injection with Hilt
+
+### Repository Binding
+
+Repositories are injected as singletons:
+
+```kotlin
+@Singleton
+class SupabaseGroupRepository @Inject constructor(
+    private val supabaseClient: SupabaseClient
+) : GroupRepository
+```
+
+### ViewModel Injection
+
+ViewModels receive repository instances via constructor injection:
+
+```kotlin
+@HiltViewModel
+class GroupsViewModel @Inject constructor(
+    private val groupRepository: GroupRepository
+) : ViewModel()
+```
+
+## Reactive Data with Flow
+
+### Observing Data Changes
+
+Repositories expose `Flow<DataResult<T>>` for reactive UI updates:
+
+```kotlin
+// In Repository
+override fun listGroups(): Flow<DataResult<List<Group>>> = _groups
+
+// In ViewModel
+val groupsState: StateFlow<DataResult<List<Group>>> = 
+    groupRepository.listGroups()
+        .stateIn(viewModelScope, SharingStarted.Lazily, DataResult.Loading)
+```
+
+### Data Refresh
+
+Repositories provide explicit refresh methods:
+
+```kotlin
+suspend fun refreshGroups() {
+    try {
+        val data = fetchFromSupabase()
+        _groups.value = DataResult.Success(data)
+    } catch (e: Exception) {
+        _groups.value = DataResult.Error("Refresh failed", e)
+    }
+}
+```
+
+## Suspend Functions
+
+All data mutations use Kotlin coroutines with `suspend` functions:
+
+```kotlin
+suspend fun createGroup(name: String, icon: GroupIcon): Group
+suspend fun updateGroup(groupId: String, name: String, icon: GroupIcon)
+suspend fun deleteGroup(groupId: String)
+```
+
+This ensures operations are non-blocking and can be safely called from coroutine scopes.
+
+## Repository List
+
+<CardGroup cols={2}>
+  <Card title="GroupRepository" icon="users" href="/repositories/group-repository">
+    Manage groups, members, and group metadata
+  </Card>
+  
+  <Card title="ExpensesRepository" icon="receipt" href="/repositories/expense-repository">
+    Create, update, and track expenses with splits
+  </Card>
+  
+  <Card title="AuthRepository" icon="lock" href="/repositories/auth-repository">
+    Handle user authentication and sessions
+  </Card>
+  
+  <Card title="ProfilesRepository" icon="user" href="">
+    Manage user profiles and preferences
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+### 1. Always Use Interfaces
+
+Depend on interfaces, not concrete implementations:
+
+```kotlin
+// Good
+class MyViewModel @Inject constructor(
+    private val groupRepo: GroupRepository
+)
+
+// Bad
+class MyViewModel @Inject constructor(
+    private val groupRepo: SupabaseGroupRepository
+)
+```
+
+### 2. Handle All DataResult States
+
+Always handle `Loading`, `Success`, and `Error` states:
+
+```kotlin
+when (result) {
+    is DataResult.Loading -> { /* Show loading UI */ }
+    is DataResult.Success -> { /* Display data */ }
+    is DataResult.Error -> { /* Show error message */ }
+}
+```
+
+### 3. Use Coroutine Scopes
+
+Call suspend functions from appropriate coroutine scopes:
+
+```kotlin
+viewModelScope.launch {
+    val group = groupRepository.createGroup("Trip", GroupIcon.Flight)
+}
+```
+
+### 4. Local State Updates
+
+Update local state optimistically, then sync with backend:
+
+```kotlin
+override suspend fun deleteGroup(groupId: String) {
+    // Call backend
+    supabaseClient.postgrest.rpc("delete_group_cascade", params)
+    
+    // Update local state
+    _groups.update { result ->
+        val current = (result as? DataResult.Success)?.data ?: return@update result
+        DataResult.Success(current.filter { g -> g.id != groupId })
+    }
+}
+```

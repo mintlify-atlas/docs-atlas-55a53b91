@@ -1,0 +1,105 @@
+---
+title: 'UserProfile'
+description: 'Data model for user profile information in Divvy'
+---
+
+The `UserProfile` model represents a user's basic profile information in the Divvy app.
+
+## Data Class Definition
+
+```kotlin UserProfile.kt
+package com.example.divvy.models
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class UserProfile(
+    val id: String,
+    val displayName: String,
+    val email: String? = null
+)
+```
+
+Source: UserProfile.kt
+
+## Fields
+
+<ParamField path="id" type="String" required>
+  Unique identifier for the user
+</ParamField>
+
+<ParamField path="displayName" type="String" required>
+  The user's display name shown throughout the app
+</ParamField>
+
+<ParamField path="email" type="String?" default="null">
+  Optional email address for the user. Nullable field.
+</ParamField>
+
+## Usage Examples
+
+### Creating a UserProfile
+
+```kotlin
+val userProfile = UserProfile(
+    id = "user_123",
+    displayName = "Sarah Chen",
+    email = "sarah@example.com"
+)
+```
+
+### UserProfile Without Email
+
+```kotlin
+val userProfile = UserProfile(
+    id = "user_456",
+    displayName = "Alex Johnson"
+    // email is null by default
+)
+```
+
+## Related Models
+
+### GroupMember
+
+A simplified representation of a user within a group context:
+
+```kotlin GroupMember.kt
+@Serializable
+data class GroupMember(
+    val userId: String,
+    val name: String
+)
+```
+
+Source: [GroupMember.kt:6]
+
+The `GroupMember` model is used when displaying members in a group and only requires the user ID and name, not the full profile information.
+
+### MemberBalance
+
+Represents a user's balance within a specific group:
+
+```kotlin MemberBalance.kt
+@Serializable
+data class MemberBalance(
+    val userId: String,
+    val name: String,
+    val balanceCents: Long   // positive = they owe you, negative = you owe them
+)
+```
+
+Source: [MemberBalance.kt:6]
+
+## Serialization
+
+The `UserProfile` model uses Kotlin Serialization with the `@Serializable` annotation. All fields are serialized with their property names (no custom `@SerialName` annotations).
+
+## Usage in the App
+
+User profiles are referenced throughout the app:
+
+- **Group Creation**: The `createdBy` field in [Group](group) references a user ID
+- **Expenses**: The `paidByUserId` field in [Expense](expense) indicates who paid
+- **Ledger Entries**: The `paidByUserId` and `toUserId` fields in [LedgerEntry](ledger-entry) track transactions between users
+- **Activity Feed**: User names and IDs are displayed in expense and settlement activities

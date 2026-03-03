@@ -1,0 +1,209 @@
+---
+title: Analytics
+description: View spending patterns, track group expenses, and analyze your financial activity
+---
+
+## Overview
+
+Analytics provides insights into your spending across all groups. See where your money goes, how much you've contributed, and identify spending trends.
+
+## Accessing Analytics
+
+Tap the Analytics tab in the bottom navigation to view your spending dashboard.
+
+## Total Group Spending
+
+The top card displays your aggregate spending across all groups:
+
+```
+Total group spending
+$1,247.50
+23 expenses across all groups
+```
+
+This represents the sum of all expense totals in groups you belong to, regardless of who paid.
+
+## Key Metrics
+
+Two stat cards show your personal financial breakdown:
+
+<CardGroup cols={2}>
+  <Card title="Your share" icon="chart-pie">
+    The total amount of all expenses that you're responsible for (your portion of split costs).
+    
+    Example: **$432.80**
+  </Card>
+  <Card title="You paid" icon="wallet">
+    The total amount you've actually paid out-of-pocket for expenses (regardless of split).
+    
+    Example: **$485.20**
+  </Card>
+</CardGroup>
+
+### Understanding the Difference
+
+- **Your share**: What you _should_ pay based on splits
+- **You paid**: What you _actually_ paid upfront
+- **Difference**: The gap between these determines if you're overpaying or underpaying
+
+## Overpaid/Underpaid Summary
+
+This card shows the net difference between what you paid and your actual share:
+
+<Tabs>
+  <Tab title="Overpaid (Green)">
+    **"You've overpaid by $52.40"**
+    
+    - Displayed in green
+    - Means you fronted more money than your share of expenses
+    - Others owe you to balance things out
+    - Subtitle: "You fronted more than your share"
+  </Tab>
+  
+  <Tab title="Underpaid (Red)">
+    **"You've underpaid by $28.15"**
+    
+    - Displayed in red
+    - Means others covered more than their share
+    - You owe money to settle your portion
+    - Subtitle: "You owe others for expenses they covered"
+  </Tab>
+</Tabs>
+
+**Calculation:**
+
+```
+Overpaid amount = (You paid) - (Your share)
+
+Example:
+You paid: $485.20
+Your share: $432.80
+Overpaid by: $52.40
+```
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/analytics/Views/AnalyticsScreen.kt:207`
+
+## Spending by Group
+
+This section breaks down your expenses by each group you belong to.
+
+### Group Spending Cards
+
+Each group displays:
+
+- **Group icon**: Visual identifier
+- **Group name**: "Roommates", "Weekend Trip", etc.
+- **Your share**: Your portion of expenses in this group
+- **Group total**: Total spending across all members
+- **Progress bar**: Visual representation of your share relative to the highest-spending group
+
+**Example:**
+
+```
+[🏠] Roommates
+Group total: $845.30
+                                              $312.40
+[████████████████░░░░░░] 60% of max spending
+```
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/analytics/Views/AnalyticsScreen.kt:252`
+
+### Visual Scaling
+
+The progress bars are normalized to the group with the highest spending:
+
+- The group where you've spent the most shows a full bar (100%)
+- Other groups scale proportionally
+- Bars animate smoothly when the screen loads
+
+### Sorting
+
+Groups are displayed in order of your total share (highest to lowest).
+
+## Data Breakdown
+
+Analytics aggregates data from:
+
+1. **All expenses** across your groups
+2. **Your splits** within those expenses
+3. **Who paid** for each expense
+4. **Settlement history** (reduces outstanding balances)
+
+## Activity Feed Reference
+
+While analytics shows aggregate numbers, you can see individual transactions in:
+
+- **Group activity feeds**: Shows recent expenses per group
+- **Ledger**: Complete transaction history across all groups
+
+See [Ledger](/features/ledger) for detailed transaction views.
+
+## Analytics Data Model
+
+The analytics view model calculates:
+
+```kotlin
+data class GroupSpending(
+    val groupId: String,
+    val groupName: String,
+    val groupIcon: GroupIcon,
+    val yourShareCents: Long,     // Your portion of group expenses
+    val totalCents: Long          // Total group spending
+)
+```
+
+Key calculations:
+
+- **Total spent**: Sum of all `Expense.amountCents` across groups
+- **Your share**: Sum of all `Split.amountCents` where `userId` = you
+- **You paid**: Sum of all `Expense.amountCents` where `paidByUserId` = you
+- **Overpaid**: `(You paid) - (Your share)`
+
+Reference: `~/workspace/source/app/src/main/java/com/example/divvy/ui/analytics/ViewModels/AnalyticsViewModel.kt`
+
+## Use Cases
+
+### Budget Tracking
+
+Monitor your total group spending to stay within budget:
+
+- Set personal spending limits
+- Track monthly group expenses
+- Identify which groups cost the most
+
+### Expense Patterns
+
+Understand where your money goes:
+
+- See if one group dominates your spending
+- Compare spending across roommates, trips, or events
+- Analyze personal vs. group spending habits
+
+### Settlement Planning
+
+Use overpaid/underpaid metrics to:
+
+- Identify who to settle up with
+- See if you need to request money or send payments
+- Balance out-of-pocket costs with actual obligations
+
+## Future Enhancements
+
+Planned analytics features:
+
+- **Date range filters**: View spending for specific time periods
+- **Category breakdown**: Expenses by type (food, travel, utilities)
+- **Export options**: Download spending reports as CSV/PDF
+- **Charts and graphs**: Visual spending trends over time
+
+## Empty State
+
+If you have no expenses yet:
+
+- Analytics will show $0.00 for all metrics
+- The spending by group section will be empty
+- Add expenses to start seeing analytics
+
+<Info>
+Analytics update in real-time as you add expenses and settle balances.
+</Info>

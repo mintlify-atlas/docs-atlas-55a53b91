@@ -1,0 +1,485 @@
+---
+title: 'Development Workflow'
+description: 'Build features and contribute to Divvy'
+---
+
+This guide covers the development workflow, architecture patterns, and best practices for contributing to Divvy.
+
+## Project Structure
+
+Divvy follows a clean architecture pattern organized by feature and layer:
+
+```
+app/src/main/java/com/example/divvy/
+├── backend/           # Data layer - repositories and data sources
+├── ui/                # Presentation layer - screens and ViewModels
+│   ├── home/
+│   │   ├── Views/     # Composable UI components
+│   │   └── ViewModels/ # State management
+│   ├── groups/
+│   ├── expenses/
+│   ├── navigation/    # App navigation graph
+│   └── theme/         # Design system
+├── models/            # Domain models and data classes
+├── components/        # Reusable UI components
+├── di/                # Dependency injection modules
+├── MainActivity.kt
+├── AuthActivity.kt
+└── FeatureFlags.kt
+```
+
+### Key Directories
+
+<Steps>
+  <Step title="backend/ - Data Layer">
+    Contains repository interfaces and Supabase implementations:
+
+    - `GroupRepository.kt` / `SupabaseGroupRepository.kt`
+    - `ExpensesRepository.kt` / `SupabaseExpensesRepository.kt`
+    - `AuthRepository.kt` / `SupabaseAuthRepository.kt`
+    - `ProfilesRepository.kt`, `MemberRepository.kt`, `BalanceRepository.kt`
+    - `DataResult.kt` - Sealed class for async operation states
+
+    Example repository pattern:
+    ```kotlin
+    interface GroupRepository {
+        suspend fun listGroups(): Flow<DataResult<List<Group>>>
+    }
+
+    @Singleton
+    class SupabaseGroupRepository @Inject constructor(
+        private val supabaseClient: SupabaseClient
+    ) : GroupRepository {
+        // Implementation
+    }
+    ```
+  </Step>
+
+  <Step title="ui/ - Presentation Layer">
+    Organized by feature, each with `Views/` and `ViewModels/` subdirectories:
+
+    - `home/` - Activity feed and quick stats
+    - `groups/` - Group list and creation
+    - `groupdetail/` - Group expenses and members
+    - `expenses/` - Expense list
+    - `splitexpense/` - Create and split expenses
+    - `assignitems/` - Itemized receipt splitting
+    - `ledger/` - Settlement tracking
+    - `profile/` - User profile settings
+    - `navigation/` - NavHost and destination definitions
+  </Step>
+
+  <Step title="models/ - Domain Models">
+    Data classes representing core business entities:
+
+    - `Group.kt` - Group information and balance
+    - `Expense.kt` - Individual expense records
+    - `UserProfile.kt` - User account data
+    - `Split.kt` - Expense split allocation
+    - `LedgerEntry.kt` - Settlement records
+  </Step>
+
+  <Step title="components/ - Shared UI">
+    Reusable Compose components:
+
+    - `PrimaryButton.kt` - Primary CTA button
+    - `OutlineButton.kt` - Secondary button
+    - `GroupIcon.kt` - Group avatar component
+    - `AuthTextField.kt` - Styled input field
+  </Step>
+
+  <Step title="di/ - Dependency Injection">
+    Hilt modules for dependency management:
+
+    - `AppModule.kt` - Repository bindings
+    - `NetworkModule.kt` - Supabase client provider
+  </Step>
+</Steps>
+
+## MVVM Architecture
+
+Divvy uses the **Model-View-ViewModel (MVVM)** pattern with Jetpack Compose:
+
+```
+┌─────────────┐      ┌──────────────┐      ┌────────────┐
+│   View      │──────│  ViewModel   │──────│ Repository │
+│  (Compose)  │      │   (State)    │      │   (Data)   │
+└─────────────┘      └──────────────┘      └────────────┘
+```
+
+### Workflow
+
+1. **View** - Composable functions observe ViewModel state
+2. **ViewModel** - Manages UI state and business logic, calls repositories
+3. **Repository** - Fetches data from Supabase, returns `Flow<DataResult<T>>`
+
+### Example: HomeViewModel Pattern
+
+```kotlin
+// 1. Define UI State
+data class HomeUiState(
+    val groups: List<Group> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null
+)
+
+// 2. ViewModel with Hilt injection
+@HiltViewModel
+class HomeViewModel @Inject constructor(
+    private val groupRepository: GroupRepository
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(HomeUiState(isLoading = true))
+    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            groupRepository.listGroups().collect { result ->
+                _uiState.update { current ->
+                    when (result) {
+                        is DataResult.Loading -> current.copy(isLoading = true)
+                        is DataResult.Error -> current.copy(
+                            isLoading = false,
+                            errorMessage = result.message
+                        )
+                        is DataResult.Success -> current.copy(
+                            groups = result.data,
+                            isLoading = false
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 3. Composable View
+@Composable
+fun HomeScreen(
+    viewModel: HomeViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+
+    when {
+        uiState.isLoading -> LoadingIndicator()
+        uiState.errorMessage != null -> ErrorView(uiState.errorMessage!!)
+        else -> GroupsList(groups = uiState.groups)
+    }
+}
+```
+
+See `app/src/main/java/com/example/divvy/ui/home/ViewModels/HomeViewModel.kt:1` for the full implementation.
+
+## Adding a New Feature
+
+Follow these steps to add a new feature to Divvy:
+
+<Steps>
+  <Step title="Define the domain model">
+    Create data classes in `models/` if needed:
+
+    ```kotlin
+    // models/Transaction.kt
+    package com.example.divvy.models
+
+    import kotlinx.serialization.Serializable
+
+    @Serializable
+    data class Transaction(
+        val id: String,
+        val amount: Long,
+        val description: String,
+        val userId: String,
+        val createdAt: String
+    )
+    ```
+  </Step>
+
+  <Step title="Create repository interface">
+    Define data access in `backend/`:
+
+    ```kotlin
+    // backend/TransactionRepository.kt
+    interface TransactionRepository {
+        suspend fun getTransactions(): Flow<DataResult<List<Transaction>>>
+    }
+
+    // backend/SupabaseTransactionRepository.kt
+    @Singleton
+    class SupabaseTransactionRepository @Inject constructor(
+        private val supabaseClient: SupabaseClient
+    ) : TransactionRepository {
+        override suspend fun getTransactions(): Flow<DataResult<List<Transaction>>> = flow {
+            emit(DataResult.Loading)
+            try {
+                val data = supabaseClient.from("transactions")
+                    .select()
+                    .decodeList<Transaction>()
+                emit(DataResult.Success(data))
+            } catch (e: Exception) {
+                emit(DataResult.Error(e.message ?: "Unknown error"))
+            }
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Register dependency in AppModule">
+    Bind the implementation in `di/AppModule.kt:1`:
+
+    ```kotlin
+    @Module
+    @InstallIn(SingletonComponent::class)
+    abstract class AppModule {
+        @Binds @Singleton
+        abstract fun bindTransactionRepository(
+            impl: SupabaseTransactionRepository
+        ): TransactionRepository
+    }
+    ```
+  </Step>
+
+  <Step title="Create ViewModel">
+    Add state management in `ui/transactions/ViewModels/`:
+
+    ```kotlin
+    // ui/transactions/ViewModels/TransactionsViewModel.kt
+    data class TransactionsUiState(
+        val transactions: List<Transaction> = emptyList(),
+        val isLoading: Boolean = false,
+        val errorMessage: String? = null
+    )
+
+    @HiltViewModel
+    class TransactionsViewModel @Inject constructor(
+        private val transactionRepository: TransactionRepository
+    ) : ViewModel() {
+
+        private val _uiState = MutableStateFlow(TransactionsUiState(isLoading = true))
+        val uiState: StateFlow<TransactionsUiState> = _uiState.asStateFlow()
+
+        init {
+            loadTransactions()
+        }
+
+        private fun loadTransactions() {
+            viewModelScope.launch {
+                transactionRepository.getTransactions().collect { result ->
+                    // Update state based on result
+                }
+            }
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Build the UI">
+    Create Compose screens in `ui/transactions/Views/`:
+
+    ```kotlin
+    // ui/transactions/Views/TransactionsScreen.kt
+    @Composable
+    fun TransactionsScreen(
+        viewModel: TransactionsViewModel = hiltViewModel(),
+        onTransactionClick: (String) -> Unit
+    ) {
+        val uiState by viewModel.uiState.collectAsState()
+
+        Scaffold(
+            topBar = { TopAppBar(title = { Text("Transactions") }) }
+        ) { padding ->
+            LazyColumn(modifier = Modifier.padding(padding)) {
+                items(uiState.transactions) { transaction ->
+                    TransactionItem(
+                        transaction = transaction,
+                        onClick = { onTransactionClick(transaction.id) }
+                    )
+                }
+            }
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Add navigation route">
+    Define the destination in `ui/navigation/AppDestination.kt:1`:
+
+    ```kotlin
+    sealed interface AppDestination {
+        @Serializable data object Transactions : AppDestination
+    }
+    ```
+
+    Add to NavHost in `ui/navigation/AppNavHost.kt:1`:
+
+    ```kotlin
+    composable<AppDestination.Transactions> {
+        TransactionsScreen(
+            onTransactionClick = { id ->
+                navController.navigate(AppDestination.TransactionDetail(id))
+            }
+        )
+    }
+    ```
+  </Step>
+</Steps>
+
+## Coding Standards
+
+### Kotlin Style
+
+- Follow [Kotlin coding conventions](https://kotlinlang.org/docs/coding-conventions.html)
+- Use meaningful variable names: `groupId` not `gid`
+- Prefer `val` over `var` for immutability
+- Use data classes for models
+- Leverage Kotlin coroutines for async operations
+
+### Compose Best Practices
+
+- **State hoisting**: Pass state and events down to composables
+- **Stateless composables**: Keep UI functions pure when possible
+- **Preview annotations**: Add `@Preview` for UI components
+- **Modifier ordering**: Size → Padding → Visual effects
+- **Remember state**: Use `remember` for UI-only state
+
+Example:
+```kotlin
+@Composable
+fun GroupItem(
+    group: Group,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        // Content
+    }
+}
+```
+
+### Dependency Injection with Hilt
+
+Divvy uses [Hilt](https://dagger.dev/hilt/) for dependency injection:
+
+- Mark Application class with `@HiltAndroidApp` (see `DivvyApplication.kt:1`)
+- Annotate ViewModels with `@HiltViewModel`
+- Use `@Inject constructor()` for repository dependencies
+- Register bindings in `@Module` classes under `di/`
+
+## Working with Supabase
+
+### Database Schema
+
+Divvy's Supabase database includes these main tables:
+
+- `profiles` - User account information
+- `groups` - Group metadata
+- `group_members` - Group membership junction table
+- `expenses` - Expense records
+- `expense_splits` - How expenses are divided
+- `ledger_entries` - Settlement transactions
+
+### Row Level Security (RLS)
+
+Supabase RLS policies ensure users can only access their own data:
+
+- Users can only read groups they're members of
+- Only group members can create expenses for that group
+- Profiles are readable by authenticated users
+
+<Note>
+When adding new tables or modifying queries, ensure RLS policies are properly configured in the Supabase dashboard to prevent data leaks.
+</Note>
+
+### Making Queries
+
+Use the Supabase Kotlin SDK via repositories:
+
+```kotlin
+val groups = supabaseClient
+    .from("groups")
+    .select()
+    .decodeList<Group>()
+
+val expense = supabaseClient
+    .from("expenses")
+    .insert(newExpense)
+    .decodeSingle<Expense>()
+```
+
+See `app/src/main/java/com/example/divvy/backend/SupabaseGroupRepository.kt:1` for real examples.
+
+## Feature Flags
+
+Divvy uses feature flags to enable/disable features during development.
+
+**Configuration**: `app/src/main/java/com/example/divvy/FeatureFlags.kt:1`
+
+```kotlin
+object FeatureFlags {
+    val AUTH_BYPASS: Boolean = BuildConfig.AUTH_BYPASS
+}
+```
+
+Flags are set in `local.properties` and injected at build time:
+
+```properties
+AUTH_BYPASS=true
+```
+
+**Usage**:
+```kotlin
+if (FeatureFlags.AUTH_BYPASS) {
+    // Use dummy account for testing
+} else {
+    // Normal authentication flow
+}
+```
+
+<Note>
+Add new feature flags to `FeatureFlags.kt` and `app/build.gradle.kts` as needed for experimental features.
+</Note>
+
+## Team Workflow
+
+### Issue Tracking with Linear
+
+The team uses [Linear](https://linear.app/) for project management:
+
+- **Pick an issue**: Check the current sprint and assign yourself to a task
+- **Update status**: Move issues through "Todo", "In Progress", "In Review", "Done"
+- **Link PRs**: Reference Linear issue IDs in commit messages (e.g., `DIV-123: Add transaction list`)
+
+### UI Design with Figma
+
+- **Check designs first**: Before implementing UI, review mockups in Figma
+- **Match styles**: Use the design system defined in `ui/theme/` to match Figma specs
+- **Ask questions**: If designs are unclear, ping the team on Discord
+
+### Communication on Discord
+
+- **Daily updates**: Share progress and blockers
+- **Code reviews**: Request reviews in the dev channel
+- **Quick questions**: Use Discord for synchronous debugging help
+
+### Git Workflow
+
+1. Create a feature branch: `git checkout -b feature/transaction-list`
+2. Make commits with clear messages: `git commit -m "Add transaction repository"`
+3. Push and open a PR: `git push origin feature/transaction-list`
+4. Request review from team members
+5. Merge after approval
+
+<Warning>
+Always pull the latest changes from `main` before starting new work to avoid merge conflicts.
+</Warning>
+
+## Next Steps
+
+- Learn about [Testing](/contributing/testing) to ensure code quality
+- Review the [team contract](https://github.com/your-org/divvy/blob/main/docs/team-contract.md)
+- Check out [meeting minutes](https://github.com/your-org/divvy/tree/main/docs/meetings) for context on decisions

@@ -1,0 +1,564 @@
+---
+title: 'Testing Guide'
+description: 'Write and run tests for Divvy'
+---
+
+This guide covers testing strategies, practices, and tools for ensuring Divvy's quality and reliability.
+
+## Testing Overview
+
+Divvy's test suite is designed to cover:
+
+- **Unit tests** - Repository logic, ViewModels, and business logic
+- **UI tests** - Compose screen interactions and user flows
+- **Integration tests** - End-to-end feature workflows
+
+<Note>
+As of the current codebase snapshot, formal test files are not yet implemented. This guide outlines the recommended testing strategy and setup for contributors.
+</Note>
+
+## Testing Stack
+
+Divvy uses the following testing libraries configured in `app/build.gradle.kts:1`:
+
+```kotlin
+testImplementation(libs.junit)
+androidTestImplementation(libs.androidx.test.ext.junit)
+androidTestImplementation(libs.androidx.test.espresso.core)
+androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+debugImplementation(libs.androidx.compose.ui.test.manifest)
+```
+
+### Key Dependencies
+
+| Library | Purpose |
+|---------|--------|
+| **JUnit** | Unit testing framework |
+| **AndroidX Test** | Android instrumented tests |
+| **Espresso** | UI interaction testing |
+| **Compose Test** | Jetpack Compose UI testing |
+
+## Project Test Structure
+
+Tests should be organized in the following directories:
+
+```
+app/src/
+├── test/java/com/example/divvy/          # Unit tests
+│   ├── backend/                          # Repository tests
+│   ├── ui/                               # ViewModel tests
+│   └── models/                           # Model validation tests
+└── androidTest/java/com/example/divvy/   # Instrumented tests
+    ├── ui/                               # Compose UI tests
+    └── integration/                      # End-to-end tests
+```
+
+## Unit Testing
+
+### Testing Repositories
+
+Repositories interact with Supabase and should be tested with mocked dependencies.
+
+<Steps>
+  <Step title="Create repository test file">
+    Add a test file in `app/src/test/java/com/example/divvy/backend/`:
+
+    ```kotlin
+    // app/src/test/java/com/example/divvy/backend/GroupRepositoryTest.kt
+    package com.example.divvy.backend
+
+    import com.example.divvy.models.Group
+    import io.github.jan.supabase.SupabaseClient
+    import kotlinx.coroutines.flow.first
+    import kotlinx.coroutines.test.runTest
+    import org.junit.Before
+    import org.junit.Test
+    import org.junit.Assert.*
+    import org.mockito.Mock
+    import org.mockito.MockitoAnnotations
+    import org.mockito.kotlin.whenever
+
+    class GroupRepositoryTest {
+
+        @Mock
+        private lateinit var supabaseClient: SupabaseClient
+
+        private lateinit var repository: SupabaseGroupRepository
+
+        @Before
+        fun setup() {
+            MockitoAnnotations.openMocks(this)
+            repository = SupabaseGroupRepository(supabaseClient)
+        }
+
+        @Test
+        fun `listGroups returns success with data`() = runTest {
+            // Arrange
+            val mockGroups = listOf(
+                Group(id = "1", name = "Test Group", balanceCents = 0)
+            )
+            // Mock supabase response
+
+            // Act
+            val result = repository.listGroups().first()
+
+            // Assert
+            assertTrue(result is DataResult.Success)
+            assertEquals(mockGroups, (result as DataResult.Success).data)
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Test error handling">
+    Ensure repositories handle errors gracefully:
+
+    ```kotlin
+    @Test
+    fun `listGroups returns error on network failure`() = runTest {
+        // Arrange
+        whenever(supabaseClient.from("groups"))
+            .thenThrow(RuntimeException("Network error"))
+
+        // Act
+        val result = repository.listGroups().first()
+
+        // Assert
+        assertTrue(result is DataResult.Error)
+        assertEquals("Network error", (result as DataResult.Error).message)
+    }
+    ```
+  </Step>
+</Steps>
+
+### Testing ViewModels
+
+ViewModels manage UI state and should be tested for correct state transitions.
+
+<Steps>
+  <Step title="Create ViewModel test">
+    Add test in `app/src/test/java/com/example/divvy/ui/home/`:
+
+    ```kotlin
+    // app/src/test/java/com/example/divvy/ui/home/HomeViewModelTest.kt
+    package com.example.divvy.ui.home
+
+    import com.example.divvy.backend.GroupRepository
+    import com.example.divvy.backend.DataResult
+    import com.example.divvy.models.Group
+    import com.example.divvy.ui.home.ViewModels.HomeViewModel
+    import kotlinx.coroutines.Dispatchers
+    import kotlinx.coroutines.ExperimentalCoroutinesApi
+    import kotlinx.coroutines.flow.flowOf
+    import kotlinx.coroutines.test.*
+    import org.junit.After
+    import org.junit.Before
+    import org.junit.Test
+    import org.junit.Assert.*
+    import org.mockito.Mock
+    import org.mockito.MockitoAnnotations
+    import org.mockito.kotlin.whenever
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    class HomeViewModelTest {
+
+        @Mock
+        private lateinit var groupRepository: GroupRepository
+
+        private lateinit var viewModel: HomeViewModel
+
+        private val testDispatcher = StandardTestDispatcher()
+
+        @Before
+        fun setup() {
+            MockitoAnnotations.openMocks(this)
+            Dispatchers.setMain(testDispatcher)
+        }
+
+        @After
+        fun tearDown() {
+            Dispatchers.resetMain()
+        }
+
+        @Test
+        fun `uiState shows loading initially`() = runTest {
+            // Arrange
+            whenever(groupRepository.listGroups())
+                .thenReturn(flowOf(DataResult.Loading))
+
+            // Act
+            viewModel = HomeViewModel(groupRepository)
+
+            // Assert
+            assertTrue(viewModel.uiState.value.isLoading)
+        }
+
+        @Test
+        fun `uiState shows groups on success`() = runTest {
+            // Arrange
+            val groups = listOf(Group(id = "1", name = "Test", balanceCents = 100))
+            whenever(groupRepository.listGroups())
+                .thenReturn(flowOf(DataResult.Success(groups)))
+
+            // Act
+            viewModel = HomeViewModel(groupRepository)
+            advanceUntilIdle()
+
+            // Assert
+            assertFalse(viewModel.uiState.value.isLoading)
+            assertEquals(groups, viewModel.uiState.value.groups)
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+## UI Testing with Compose Test
+
+Compose UI tests verify screen rendering and user interactions.
+
+<Steps>
+  <Step title="Create UI test file">
+    Add test in `app/src/androidTest/java/com/example/divvy/ui/`:
+
+    ```kotlin
+    // app/src/androidTest/java/com/example/divvy/ui/home/HomeScreenTest.kt
+    package com.example.divvy.ui.home
+
+    import androidx.compose.ui.test.*
+    import androidx.compose.ui.test.junit4.createComposeRule
+    import com.example.divvy.models.Group
+    import com.example.divvy.ui.home.Views.HomeScreen
+    import com.example.divvy.ui.theme.DivvyTheme
+    import org.junit.Rule
+    import org.junit.Test
+
+    class HomeScreenTest {
+
+        @get:Rule
+        val composeTestRule = createComposeRule()
+
+        @Test
+        fun homeScreen_displaysGroupList() {
+            // Arrange
+            val groups = listOf(
+                Group(id = "1", name = "Roommates", balanceCents = 5000),
+                Group(id = "2", name = "Trip to NYC", balanceCents = -2000)
+            )
+
+            // Act
+            composeTestRule.setContent {
+                DivvyTheme {
+                    // Render HomeScreen with test data
+                }
+            }
+
+            // Assert
+            composeTestRule.onNodeWithText("Roommates").assertIsDisplayed()
+            composeTestRule.onNodeWithText("Trip to NYC").assertIsDisplayed()
+        }
+
+        @Test
+        fun homeScreen_clickGroup_navigatesToDetail() {
+            var clickedGroupId: String? = null
+
+            composeTestRule.setContent {
+                DivvyTheme {
+                    // HomeScreen with onGroupClick = { clickedGroupId = it }
+                }
+            }
+
+            // Act
+            composeTestRule.onNodeWithText("Roommates").performClick()
+
+            // Assert
+            assert(clickedGroupId == "1")
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Test user flows">
+    Verify multi-step interactions:
+
+    ```kotlin
+    @Test
+    fun createGroup_flow_success() {
+        composeTestRule.setContent {
+            DivvyTheme { GroupsScreen() }
+        }
+
+        // Click create button
+        composeTestRule.onNodeWithText("Create Group").performClick()
+
+        // Enter group name
+        composeTestRule.onNodeWithText("Group Name")
+            .performTextInput("New Group")
+
+        // Submit
+        composeTestRule.onNodeWithText("Create").performClick()
+
+        // Verify success
+        composeTestRule.onNodeWithText("New Group").assertIsDisplayed()
+    }
+    ```
+  </Step>
+</Steps>
+
+### Compose Test Semantics
+
+Use semantic properties for testability:
+
+```kotlin
+@Composable
+fun GroupItem(group: Group, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.testTag("group_item_${group.id}")
+    ) {
+        Text(
+            text = group.name,
+            modifier = Modifier.semantics { contentDescription = "Group name" }
+        )
+    }
+}
+
+// Test
+composeTestRule.onNodeWithTag("group_item_1").performClick()
+```
+
+## Running Tests
+
+### Run All Unit Tests
+
+```bash
+./gradlew test
+```
+
+This runs tests in `app/src/test/` and outputs results to:
+```
+app/build/reports/tests/testDebugUnitTest/index.html
+```
+
+### Run All Instrumented Tests
+
+Requires a connected device or emulator:
+
+```bash
+./gradlew connectedAndroidTest
+```
+
+Results are saved to:
+```
+app/build/reports/androidTests/connected/index.html
+```
+
+### Run Specific Test Class
+
+```bash
+# Unit test
+./gradlew test --tests HomeViewModelTest
+
+# Instrumented test
+./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.divvy.ui.home.HomeScreenTest
+```
+
+### Run Tests in Android Studio
+
+1. Right-click on a test file or directory
+2. Select **Run 'Tests in ...'**
+3. View results in the **Run** tool window
+
+<Note>
+Instrumented tests run on physical devices or emulators, while unit tests run on the JVM. Use unit tests for fast feedback and instrumented tests for Android-specific behavior.
+</Note>
+
+## Test Coverage
+
+While test coverage is not currently configured, you can add JaCoCo for coverage reports:
+
+<Steps>
+  <Step title="Add JaCoCo plugin">
+    In `app/build.gradle.kts:1`:
+
+    ```kotlin
+    plugins {
+        id("jacoco")
+    }
+
+    android {
+        buildTypes {
+            debug {
+                enableUnitTestCoverage = true
+                enableAndroidTestCoverage = true
+            }
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Generate coverage report">
+    ```bash
+    ./gradlew testDebugUnitTest jacocoTestReport
+    ```
+
+    View report at:
+    ```
+    app/build/reports/jacoco/jacocoTestReport/html/index.html
+    ```
+  </Step>
+</Steps>
+
+## Continuous Integration with Vercel
+
+Divvy uses **Vercel** for CI/CD as mentioned in the README. While primarily for LLM capabilities (transaction categorization), Vercel can also run tests.
+
+<Note>
+The team is exploring Vercel integration for automated testing on every pull request. Stay tuned for updates in Linear or Discord.
+</Note>
+
+### Recommended CI Setup
+
+For GitHub Actions or similar CI:
+
+```yaml
+name: Android CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+      - name: Run unit tests
+        run: ./gradlew test
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: app/build/reports/tests/
+```
+
+## Testing Best Practices
+
+### Write Testable Code
+
+- **Inject dependencies**: Use Hilt for constructor injection
+- **Avoid static state**: Use repository patterns, not singletons with mutable state
+- **Pure functions**: Separate business logic from UI and data layers
+
+### Test Naming Conventions
+
+Use descriptive test names:
+
+```kotlin
+// Good
+@Test
+fun `listGroups returns success when data is available`()
+
+// Avoid
+@Test
+fun test1()
+```
+
+### AAA Pattern
+
+Structure tests with **Arrange, Act, Assert**:
+
+```kotlin
+@Test
+fun exampleTest() {
+    // Arrange - Set up test data and mocks
+    val input = "test"
+
+    // Act - Execute the code under test
+    val result = functionUnderTest(input)
+
+    // Assert - Verify the outcome
+    assertEquals(expected, result)
+}
+```
+
+### Mock External Dependencies
+
+Use Mockito to mock Supabase and other external services:
+
+```kotlin
+@Mock
+private lateinit var supabaseClient: SupabaseClient
+
+whenever(supabaseClient.from("groups").select())
+    .thenReturn(mockResponse)
+```
+
+### Test Edge Cases
+
+- Empty lists
+- Null values
+- Network errors
+- Invalid user input
+
+### Avoid Testing Implementation Details
+
+Focus on behavior, not internal state:
+
+```kotlin
+// Good - Tests observable behavior
+@Test
+fun `button click updates counter`() {
+    composeTestRule.onNodeWithTag("counter").assertTextEquals("0")
+    composeTestRule.onNodeWithTag("button").performClick()
+    composeTestRule.onNodeWithTag("counter").assertTextEquals("1")
+}
+
+// Avoid - Tests internal implementation
+@Test
+fun `viewModel counter variable increments`() {
+    assertEquals(0, viewModel.counter) // Accessing private state
+}
+```
+
+<Warning>
+If tests are brittle and break with every refactor, they're likely testing implementation details rather than behavior.
+</Warning>
+
+## Getting Started with Testing
+
+If you're adding the first tests to Divvy:
+
+<Steps>
+  <Step title="Start with critical paths">
+    Focus on high-value areas:
+    - Authentication flow
+    - Expense creation and splitting
+    - Group balance calculations
+  </Step>
+
+  <Step title="Add tests incrementally">
+    Don't try to reach 100% coverage immediately. Add tests:
+    - When fixing bugs (reproduce the bug in a test first)
+    - When adding new features (test-driven development)
+    - When refactoring (ensure behavior doesn't change)
+  </Step>
+
+  <Step title="Document test patterns">
+    Create example test files that others can reference for consistency.
+  </Step>
+</Steps>
+
+## Next Steps
+
+- Review the [Development Workflow](/contributing/development) for coding standards
+- Check the [Setup Guide](/contributing/setup) for environment configuration
+- Join the team on [Discord](https://discord.gg/your-server) to discuss testing strategies

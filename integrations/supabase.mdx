@@ -1,0 +1,421 @@
+---
+title: Supabase Integration
+description: Learn how Divvy integrates with Supabase for authentication and database management
+---
+
+## Overview
+
+Divvy uses [Supabase](https://supabase.com) as its backend infrastructure, providing both **authentication** (via GoTrue) and a **PostgreSQL database** (via Postgrest). This integration handles user authentication with Google OAuth, stores user profiles, manages expense groups, and tracks all financial transactions.
+
+### Key Features
+
+- **Authentication**: Google OAuth sign-in with custom redirect URLs
+- **Database**: PostgreSQL with real-time capabilities
+- **Client Library**: Supabase Kotlin SDK (`supabase-postgrest-kt` and `supabase-gotrue-kt`)
+- **Type Safety**: Serializable Kotlin data classes for all database operations
+
+## Dependencies
+
+Divvy uses the Supabase BOM (Bill of Materials) for version management:
+
+```kotlin
+// From app/build.gradle.kts
+implementation(platform(libs.supabase.bom))          // Version 2.0.0
+implementation(libs.supabase.postgrest.kt)           // Postgrest for database
+implementation(libs.supabase.gotrue.kt)              // GoTrue for auth
+implementation(libs.ktor.client.android)             // Ktor HTTP client
+```
+
+## Configuration
+
+### Environment Variables
+
+Add your Supabase credentials to `local.properties` (never commit this file):
+
+```properties
+SUPABASE_URL=https://xxxx.supabase.co
+SUPABASE_ANON_KEY=eyJ...
+```
+
+<Warning>
+**Never commit `local.properties`** - this file should be in your `.gitignore`. The Supabase anon key is safe to use in client applications but should still be kept out of version control.
+</Warning>
+
+These values are read at build time and injected as BuildConfig fields:
+
+```kotlin
+// From app/build.gradle.kts:19-20
+val supabaseUrl = localProperties.getProperty("SUPABASE_URL", "")
+val supabaseAnonKey = localProperties.getProperty("SUPABASE_ANON_KEY", "")
+
+// Injected into BuildConfig (app/build.gradle.kts:42-43)
+buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+```
+
+### Client Initialization
+
+The Supabase client is initialized using Dagger Hilt dependency injection:
+
+```kotlin
+// From di/NetworkModule.kt:24-39
+@Provides
+@Singleton
+fun provideSupabaseClient(): SupabaseClient {
+    val client = createSupabaseClient(
+        supabaseUrl = BuildConfig.SUPABASE_URL,
+        supabaseKey = BuildConfig.SUPABASE_ANON_KEY
+    ) {
+        defaultSerializer = KotlinXSerializer(Json { ignoreUnknownKeys = true })
+        install(Auth) {
+            scheme = "com.example.divvy"
+            host = "auth"
+            defaultExternalAuthAction = ExternalAuthAction.CUSTOM_TABS
+        }
+        install(Postgrest)
+    }
+    SupabaseClientProvider.setClient(client)
+    return client
+}
+```
+
+## Authentication
+
+### Google OAuth Setup
+
+<Steps>
+  <Step title="Enable Google Provider in Supabase">
+    Navigate to your Supabase project → Authentication → Providers → Google and enable it.
+  </Step>
+  
+  <Step title="Configure Redirect URL">
+    Add `com.example.divvy://auth` as a redirect URL in your Supabase Auth settings.
+    
+    This custom URL scheme is configured in the Supabase client (see `NetworkModule.kt:31-32`).
+  </Step>
+  
+  <Step title="Get Google OAuth Credentials">
+    Follow Supabase's guide to obtain Google OAuth client ID and secret.
+  </Step>
+</Steps>
+
+### Authentication Flow
+
+Divvy supports two authentication methods:
+
+1. **Google OAuth** (recommended)
+2. **Phone OTP** (SMS verification)
+
+<CodeGroup>
+```kotlin Google Sign-In
+// From ui/auth/ViewModels/AuthFlowViewModel.kt:89-96
+fun startGoogleSignIn(flow: OAuthFlow) {
+    if (!checkConfigured()) return
+    pendingOAuthFlow = flow
+    _state.update { it.copy(authMethod = "GOOGLE") }
+    launchAuth {
+        SupabaseClientProvider.client.auth.signInWith(Google)
+    }
+}
+```
+
+```kotlin Phone OTP
+// From ui/auth/ViewModels/AuthFlowViewModel.kt:98-114
+fun sendPhoneOtp(createUser: Boolean, onSuccess: () -> Unit) {
+    if (!checkConfigured()) return
+    val phone = phoneE164()
+    if (phone.isBlank()) {
+        _state.update { it.copy(errorMessage = "Phone number is required.") }
+        return
+    }
+    launchAuth {
+        _state.update { it.copy(authMethod = "PHONE") }
+        SupabaseClientProvider.client.auth.signInWith(OTP) {
+            this.phone = phone
+            this.createUser = createUser
+        }
+        _state.update { it.copy(otpSent = true) }
+        onSuccess()
+    }
+}
+```
+</CodeGroup>
+
+### Session Management
+
+The app monitors authentication state using Supabase's `sessionStatus` flow:
+
+```kotlin
+// From ui/auth/ViewModels/AuthFlowViewModel.kt:51-55
+val sessionStatus: StateFlow<SessionStatus> = if (SupabaseClientProvider.isConfigured()) {
+    SupabaseClientProvider.client.auth.sessionStatus
+} else {
+    MutableStateFlow(SessionStatus.NotAuthenticated)
+}
+```
+
+## Database Schema
+
+While the SQL schema is managed in your Supabase project, here are the key tables used by Divvy:
+
+### Core Tables
+
+- **`profiles`** - User profile information
+- **`groups`** - Expense groups
+- **`group_members`** - Many-to-many relationship between users and groups
+- **`expenses`** - Individual expenses
+- **`expense_splits`** - How expenses are split among group members
+
+### Views
+
+- **`group_expenses_with_splits`** - Denormalized view of expenses with split information
+
+### Stored Procedures (RPC)
+
+Divvy uses several PostgreSQL functions for complex operations:
+
+- `create_group_with_owner` - Creates a group and adds creator as first member
+- `get_my_groups_summary` - Returns all groups for current user with balance info
+- `create_expense_with_splits` - Atomically creates expense with all splits
+- `update_expense_splits` - Updates expense split amounts
+- `delete_group_cascade` - Deletes group and all related data
+- `add_group_member` - Adds a user to a group
+- `get_global_activity_feed` - Returns activity feed for user
+
+## Repository Pattern
+
+Divvy uses repository classes to abstract database operations:
+
+<CodeGroup>
+```kotlin Groups
+// From backend/SupabaseGroupRepository.kt:115-134
+override suspend fun refreshGroups() {
+    try {
+        val rows = supabaseClient.postgrest
+            .rpc("get_my_groups_summary")
+            .decodeList<GroupSummaryRow>()
+
+        _groups.value = DataResult.Success(rows.map { row ->
+            Group(
+                id = row.id,
+                name = row.name,
+                icon = iconFromName(row.icon),
+                memberCount = row.memberCount.toInt(),
+                balanceCents = row.balanceCents,
+                createdBy = row.createdBy
+            )
+        })
+    } catch (e: Exception) {
+        _groups.value = DataResult.Error("Failed to load groups", e)
+    }
+}
+```
+
+```kotlin Expenses
+// From backend/SupabaseExpensesRepository.kt:81-118
+override suspend fun createExpenseWithSplits(
+    groupId: String,
+    description: String,
+    amountCents: Long,
+    currency: String,
+    splitMethod: String,
+    splits: List<ExpenseSplit>
+): GroupExpense {
+    val params = buildJsonObject {
+        put("p_group_id", groupId)
+        put("p_merchant", description)
+        put("p_amount_cents", amountCents)
+        put("p_currency", currency)
+        put("p_split_method", splitMethod)
+        put("p_paid_by", authRepository.getCurrentUserId())
+        putJsonArray("p_splits") {
+            splits.forEach { split ->
+                add(buildJsonObject {
+                    put("user_id", split.userId)
+                    put("amount_cents", split.amountCents)
+                    split.isCoveredBy?.let { put("is_covered_by", it) }
+                })
+            }
+        }
+    }
+
+    val expenseId = supabaseClient.postgrest
+        .rpc("create_expense_with_splits", params)
+        .decodeAs<String>()
+
+    val groupExpense = getGroupExpenseById(expenseId)
+        ?: error("Failed to fetch expense after creation: $expenseId")
+
+    _expenses.update { map ->
+        map + (groupId to ((map[groupId] ?: emptyList()) + groupExpense))
+    }
+    return groupExpense
+}
+```
+
+```kotlin Profiles
+// From backend/ProfilesRepository.kt:18-23
+override suspend fun upsertProfile(profile: ProfileRow) {
+    client.from("profiles").upsert(
+        value = profile,
+        onConflict = "id"
+    )
+}
+```
+</CodeGroup>
+
+## Data Models
+
+All database models use `@Serializable` and `@SerialName` annotations:
+
+```kotlin
+// From models/Expense.kt:7-16
+@Serializable
+data class Expense(
+    val id: String = "",
+    @SerialName("group_id")        val groupId: String = "",
+    val merchant: String = "",
+    @SerialName("amount_cents")    val amountCents: Long = 0L,
+    @SerialName("split_method")    val splitMethod: String = "EQUAL",
+    val currency: String = "USD",
+    @SerialName("paid_by_user_id") val paidByUserId: String = "",
+    @SerialName("created_at")      val createdAt: String = ""
+)
+```
+
+<Note>
+The `@SerialName` annotation maps Kotlin's camelCase property names to PostgreSQL's snake_case column names.
+</Note>
+
+## Setting Up a New Supabase Project
+
+<Steps>
+  <Step title="Create Supabase Project">
+    Visit [supabase.com](https://supabase.com) and create a new project.
+  </Step>
+  
+  <Step title="Get API Credentials">
+    Navigate to Project Settings → API and copy:
+    - Project URL (e.g., `https://xxxx.supabase.co`)
+    - Anon/Public key
+  </Step>
+  
+  <Step title="Configure Authentication">
+    Go to Authentication → Providers:
+    - Enable Google OAuth
+    - Add redirect URL: `com.example.divvy://auth`
+    - Optionally enable Phone (SMS) provider
+  </Step>
+  
+  <Step title="Create Database Schema">
+    Create the necessary tables, views, and RPC functions. Key tables:
+    
+    - `profiles` (id, first_name, last_name, email, phone, auth_method, phone_verified)
+    - `groups` (id, name, icon, created_by, created_at)
+    - `group_members` (group_id, user_id, joined_at)
+    - `expenses` (id, group_id, merchant, amount_cents, split_method, currency, paid_by_user_id, created_at)
+    - `expense_splits` (id, expense_id, user_id, amount_cents, is_covered_by)
+  </Step>
+  
+  <Step title="Set Row Level Security (RLS)">
+    Enable RLS on all tables and create policies to ensure users can only access their own data.
+  </Step>
+  
+  <Step title="Add to local.properties">
+    ```properties
+    SUPABASE_URL=https://your-project.supabase.co
+    SUPABASE_ANON_KEY=your-anon-key-here
+    ```
+  </Step>
+</Steps>
+
+## Common Operations
+
+### Creating a Group
+
+```kotlin
+// From backend/SupabaseGroupRepository.kt:67-88
+override suspend fun createGroup(name: String, icon: GroupIcon): Group {
+    val params = buildJsonObject {
+        put("p_name", name)
+        put("p_icon", icon.name)
+    }
+    val row = supabaseClient.postgrest
+        .rpc("create_group_with_owner", params)
+        .decodeSingle<GroupRow>()
+
+    val group = Group(
+        id = row.id,
+        name = row.name,
+        icon = iconFromName(row.icon),
+        memberCount = 1,
+        balanceCents = 0L,
+        createdBy = row.createdBy
+    )
+    _groups.update { result ->
+        val current = (result as? DataResult.Success)?.data ?: emptyList()
+        DataResult.Success(current + group)
+    }
+    return group
+}
+```
+
+### Adding Members to a Group
+
+```kotlin
+// From backend/MemberRepository.kt:52-59
+override suspend fun addMember(groupId: String, userId: String) {
+    val params = buildJsonObject {
+        put("p_group_id", groupId)
+        put("p_user_id", userId)
+    }
+    supabaseClient.postgrest.rpc("add_group_member", params)
+    refreshMembers(groupId)
+}
+```
+
+### Observing Real-time Updates
+
+Repositories expose reactive `Flow` APIs for UI updates:
+
+```kotlin
+// From backend/SupabaseGroupRepository.kt:56
+override fun listGroups(): Flow<DataResult<List<Group>>> = _groups
+```
+
+## Troubleshooting
+
+### "SupabaseClient not initialised" Error
+
+This occurs when `SUPABASE_URL` or `SUPABASE_ANON_KEY` are missing from `local.properties`:
+
+```kotlin
+// From backend/SupabaseClientProvider.kt:10-12
+val client: SupabaseClient
+    get() = clientInstance
+        ?: error("SupabaseClient not initialised — ensure NetworkModule is installed")
+```
+
+**Solution**: Add both variables to `local.properties` and rebuild.
+
+### Authentication Redirect Not Working
+
+1. Verify `com.example.divvy://auth` is added in Supabase Auth settings
+2. Check that the scheme and host match in `NetworkModule.kt:31-32`
+3. Ensure Custom Tabs are enabled: `defaultExternalAuthAction = ExternalAuthAction.CUSTOM_TABS`
+
+### Database Query Errors
+
+Enable debug logging by adding `ignoreUnknownKeys = true` to JSON configuration:
+
+```kotlin
+// From di/NetworkModule.kt:29
+defaultSerializer = KotlinXSerializer(Json { ignoreUnknownKeys = true })
+```
+
+## Related Resources
+
+- [Supabase Kotlin SDK Documentation](https://supabase.com/docs/reference/kotlin/introduction)
+- [GoTrue Authentication](https://supabase.com/docs/guides/auth)
+- [Postgrest Client](https://supabase.com/docs/reference/kotlin/select)
+- [Row Level Security Guide](https://supabase.com/docs/guides/auth/row-level-security)

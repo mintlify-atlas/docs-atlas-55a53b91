@@ -1,0 +1,209 @@
+---
+title: 'Development Setup'
+description: 'Get Divvy running on your local machine'
+---
+
+This guide walks you through setting up the Divvy Android app for local development.
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Android Studio** (latest stable version recommended)
+- **JDK 8** or higher (JDK 11+ recommended)
+- **Git** for version control
+- **Android SDK** with API Level 26-36
+- A physical Android device or emulator running Android 8.0 (API 26) or higher
+
+<Note>
+Divvy targets Android SDK 36 (compileSdk) with a minimum SDK of 26. Make sure your Android Studio SDK Manager has these API levels installed.
+</Note>
+
+## Clone the Repository
+
+<Steps>
+  <Step title="Clone the repo">
+    ```bash
+    git clone https://github.com/your-org/divvy.git
+    cd divvy
+    ```
+  </Step>
+
+  <Step title="Open in Android Studio">
+    Launch Android Studio and select **Open** from the welcome screen, then navigate to the cloned repository root directory.
+  </Step>
+</Steps>
+
+## Configure Environment Variables
+
+Divvy uses Supabase for backend services. You'll need to configure your local environment with the proper credentials.
+
+<Steps>
+  <Step title="Create local.properties file">
+    In the project root directory (same level as `build.gradle.kts`), create a file named `local.properties` if it doesn't already exist.
+
+    <Warning>
+    Never commit `local.properties` to version control. This file is already in `.gitignore` and contains sensitive credentials.
+    </Warning>
+  </Step>
+
+  <Step title="Add Supabase credentials">
+    Add the following environment variables to `local.properties`:
+
+    ```properties
+    SUPABASE_URL=https://xxxx.supabase.co
+    SUPABASE_ANON_KEY=eyJ...
+    AUTH_BYPASS=false
+    ```
+
+    <Note>
+    **Need credentials?** Contact [@vivekbw](https://github.com/vivekbw) or any team member asynchronously to get the Supabase URL and anon key. See the [team members list](https://github.com/your-org/divvy#team) in the README.
+    </Note>
+  </Step>
+
+  <Step title="Configure Supabase Auth">
+    In your Supabase project dashboard:
+
+    1. Navigate to **Authentication** → **Providers**
+    2. Enable the **Google** provider
+    3. Add the redirect URL: `com.example.divvy://auth`
+
+    This allows OAuth authentication to work properly in the app.
+  </Step>
+</Steps>
+
+### Environment Variables Explained
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `SUPABASE_URL` | Your Supabase project URL | Yes |
+| `SUPABASE_ANON_KEY` | Supabase anonymous/public API key | Yes |
+| `AUTH_BYPASS` | Skip authentication (use `true` for testing without Supabase) | No (defaults to `false`) |
+
+<Note>
+The `AUTH_BYPASS` flag is useful for UI development when you don't have Supabase credentials. Set it to `true` to use a dummy account defined in `app/src/main/java/com/example/divvy/ui/auth/DummyAccount.kt`.
+</Note>
+
+## Sync and Build
+
+<Steps>
+  <Step title="Gradle sync">
+    Android Studio should automatically prompt you to sync Gradle. If not, click **File** → **Sync Project with Gradle Files**.
+
+    Wait for the sync to complete. This will download all dependencies including:
+    - Jetpack Compose libraries
+    - Supabase Kotlin SDK
+    - Hilt (dependency injection)
+    - CameraX (for receipt scanning)
+  </Step>
+
+  <Step title="Verify configuration">
+    The build system reads `local.properties` and injects the values as `BuildConfig` fields:
+
+    ```kotlin
+    BuildConfig.SUPABASE_URL
+    BuildConfig.SUPABASE_ANON_KEY
+    BuildConfig.AUTH_BYPASS
+    ```
+
+    These are available throughout the app at compile time.
+  </Step>
+</Steps>
+
+## Run the App
+
+### Using Android Studio
+
+<Steps>
+  <Step title="Select run configuration">
+    In the toolbar, ensure the **app** configuration is selected.
+  </Step>
+
+  <Step title="Choose a device">
+    Select a physical device or emulator from the device dropdown.
+  </Step>
+
+  <Step title="Run">
+    Click the green **Run** button or press `Shift + F10` (Windows/Linux) or `Control + R` (Mac).
+  </Step>
+</Steps>
+
+### Using Command Line
+
+You can also build and install the app via Gradle:
+
+```bash
+# Build debug APK
+./gradlew :app:assembleDebug
+
+# Install on connected device
+./gradlew :app:installDebug
+
+# Build and install in one step
+./gradlew :app:installDebug
+```
+
+The APK will be generated at:
+```
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+## Troubleshooting
+
+### Gradle Sync Fails
+
+**Problem:** "Could not resolve all dependencies"
+
+**Solution:**
+- Ensure you have a stable internet connection
+- Check that your `local.properties` includes the Android SDK path (Android Studio usually adds this automatically)
+- Try **File** → **Invalidate Caches** → **Invalidate and Restart**
+
+### Build Config Fields Not Found
+
+**Problem:** `BuildConfig.SUPABASE_URL` shows as unresolved
+
+**Solution:**
+- Verify `local.properties` exists in the project root
+- Check that the properties are spelled correctly (case-sensitive)
+- Rebuild the project: **Build** → **Rebuild Project**
+
+### Supabase Connection Errors
+
+**Problem:** "SupabaseClient not initialised" at runtime
+
+**Solution:**
+- Confirm your `SUPABASE_URL` and `SUPABASE_ANON_KEY` are correct
+- Check that the Supabase project is active and not paused
+- Verify network connectivity
+- As a workaround for development, set `AUTH_BYPASS=true` in `local.properties`
+
+### Authentication Fails
+
+**Problem:** Google Sign-In doesn't work
+
+**Solution:**
+- Ensure the redirect URL `com.example.divvy://auth` is added in Supabase Auth settings
+- Check that the Google provider is enabled in Supabase
+- Verify your device/emulator has Google Play Services installed
+
+### Camera Permission Issues
+
+**Problem:** Receipt scanning crashes or doesn't request camera permission
+
+**Solution:**
+- Check that your device/emulator grants camera permissions
+- For emulators, enable camera in AVD settings
+- Reinstall the app to trigger permission dialogs again
+
+<Warning>
+If you encounter persistent issues, reach out to the team on [Discord](https://discord.gg/your-server) or check existing [Linear issues](https://linear.app/) for similar problems.
+</Warning>
+
+## Next Steps
+
+Now that your environment is set up:
+
+- Learn about the [Development Workflow](/contributing/development)
+- Explore the [Testing Guide](/contributing/testing)
+- Review the [team contract](https://github.com/your-org/divvy/blob/main/docs/team-contract.md)

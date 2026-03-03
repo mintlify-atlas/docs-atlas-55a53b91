@@ -1,0 +1,169 @@
+---
+title: 'Group'
+description: 'Data model representing a shared expense group in Divvy'
+---
+
+The `Group` model represents a collection of users who share expenses together. Each group tracks its members, balance, and visual identity.
+
+## Data Class Definition
+
+```kotlin Group.kt
+package com.example.divvy.models
+
+import com.example.divvy.components.GroupIcon
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class Group(
+    val id: String,
+    val name: String,
+    val emoji: String = "",
+    val icon: GroupIcon = GroupIcon.Group,
+    val memberCount: Int = 0,
+    val balanceCents: Long = 0L,
+    val currency: String = "USD",
+    val createdBy: String = ""
+) {
+    /** Positive = you are owed, negative = you owe */
+    val isOwed: Boolean get() = balanceCents >= 0
+
+    val formattedBalance: String
+        get() {
+            val dollars = kotlin.math.abs(balanceCents) / 100.0
+            return "$${String.format("%.2f", dollars)}"
+        }
+
+    val balanceLabel: String
+        get() = if (isOwed) "You are owed ${formattedBalance}" else "You owe ${formattedBalance}"
+}
+```
+
+Source: [Group.kt:7]
+
+## Fields
+
+<ParamField path="id" type="String" required>
+  Unique identifier for the group
+</ParamField>
+
+<ParamField path="name" type="String" required>
+  Display name of the group (e.g., "Roommates", "Europe Trip")
+</ParamField>
+
+<ParamField path="emoji" type="String" default='""'>
+  Optional emoji character to display alongside the group icon
+</ParamField>
+
+<ParamField path="icon" type="GroupIcon" default="GroupIcon.Group">
+  Visual icon for the group. See [GroupIcon] for available options.
+</ParamField>
+
+<ParamField path="memberCount" type="Int" default="0">
+  Number of members currently in the group
+</ParamField>
+
+<ParamField path="balanceCents" type="Long" default="0L">
+  Current user's balance in cents. Positive values indicate the user is owed money, negative values indicate the user owes money.
+</ParamField>
+
+<ParamField path="currency" type="String" default='"USD"'>
+  Three-letter ISO currency code for the group's transactions
+</ParamField>
+
+<ParamField path="createdBy" type="String" default='""'>
+  User ID of the member who created the group
+</ParamField>
+
+## Computed Properties
+
+The `Group` model includes several computed properties for convenient UI display:
+
+### isOwed
+
+```kotlin
+val isOwed: Boolean get() = balanceCents >= 0
+```
+
+Returns `true` if the current user is owed money (balance is positive or zero), `false` if they owe money.
+
+### formattedBalance
+
+```kotlin
+val formattedBalance: String
+    get() {
+        val dollars = kotlin.math.abs(balanceCents) / 100.0
+        return "$${String.format("%.2f", dollars)}"
+    }
+```
+
+Returns the absolute value of the balance formatted as a dollar amount (e.g., "$15.50").
+
+### balanceLabel
+
+```kotlin
+val balanceLabel: String
+    get() = if (isOwed) "You are owed ${formattedBalance}" else "You owe ${formattedBalance}"
+```
+
+Returns a human-readable label describing the user's balance (e.g., "You are owed $15.50" or "You owe $15.50").
+
+## Relationships
+
+- **Members**: A group contains multiple users. See [GroupMember](group-member) for member details.
+- **Expenses**: A group can have many expenses. See [Expense](expense) and GroupExpense models.
+- **Balances**: Each member has a balance within the group. See [MemberBalance](member-balance).
+
+## Usage Examples
+
+### Creating a Group
+
+```kotlin
+val group = Group(
+    id = "grp_123",
+    name = "Roommates",
+    icon = GroupIcon.Home,
+    memberCount = 3,
+    balanceCents = 1550L, // User is owed $15.50
+    currency = "USD",
+    createdBy = "user_abc"
+)
+```
+
+### Accessing Computed Properties
+
+```kotlin
+val group = Group(
+    id = "grp_123",
+    name = "Roommates",
+    balanceCents = -2500L // User owes $25.00
+)
+
+println(group.isOwed)           // false
+println(group.formattedBalance) // "$25.00"
+println(group.balanceLabel)     // "You owe $25.00"
+```
+
+### Repository Operations
+
+From [GroupRepository.kt]:
+
+```kotlin
+// Create a new group
+suspend fun createGroup(name: String, icon: GroupIcon): Group {
+    val id = "grp_${UUID.randomUUID()}"
+    return Group(id = id, name = name, icon = icon, createdBy = "u_me")
+}
+
+// Get a group by ID
+fun getGroup(groupId: String): Flow<Group>
+
+// Update group details
+suspend fun updateGroup(groupId: String, name: String, icon: GroupIcon)
+
+// Delete a group
+suspend fun deleteGroup(groupId: String)
+```
+
+## Serialization
+
+The `Group` model uses Kotlin Serialization with the `@Serializable` annotation. All fields are serialized with their property names (no custom `@SerialName` annotations).

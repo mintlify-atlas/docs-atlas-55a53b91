@@ -1,0 +1,489 @@
+---
+title: Plaid Integration
+description: Learn how Divvy plans to integrate with Plaid for automatic bank transaction detection
+---
+
+## Overview
+
+Divvy's core value proposition is bringing expense splitting to **the moment of payment**. Instead of manually logging expenses after the fact, Divvy integrates with [Plaid](https://plaid.com) to detect bank transactions automatically and prompt users to split expenses in real-time.
+
+<Note>
+**Implementation Status**: The Plaid integration is currently in the planning/development phase. This documentation describes the intended architecture based on the project vision outlined in the README.
+</Note>
+
+### Key Features (Planned)
+
+- **Automatic Transaction Detection**: Monitor user bank accounts for new transactions
+- **Smart Categorization**: Use LLM-powered categorization to identify potentially shared expenses
+- **Real-time Notifications**: Alert users immediately when a splittable expense is detected
+- **Receipt Matching**: Link detected transactions to scanned receipts for itemized splitting
+- **Multi-bank Support**: Connect multiple bank accounts through Plaid's unified API
+
+## How It Works
+
+The Plaid integration follows this workflow:
+
+<Steps>
+  <Step title="Bank Account Linking">
+    Users connect their bank accounts through Plaid Link, a secure OAuth-like flow that never exposes credentials to Divvy.
+  </Step>
+  
+  <Step title="Transaction Monitoring">
+    Divvy receives webhook notifications from Plaid whenever new transactions appear in the user's account.
+  </Step>
+  
+  <Step title="AI Categorization">
+    Transactions are sent to Vercel Edge Functions with LLM capabilities to determine if they're likely to be shared expenses.
+    
+    Example categories:
+    - Restaurant/dining (high likelihood)
+    - Groceries (medium likelihood)
+    - Entertainment/events (high likelihood)
+    - Gas/transportation (low likelihood)
+    - Personal shopping (low likelihood)
+  </Step>
+  
+  <Step title="User Notification">
+    When a potentially shared expense is detected, Divvy sends a push notification with a deep link to quickly create a split.
+  </Step>
+  
+  <Step title="Expense Creation">
+    The user can:
+    - Accept the suggested split and choose group members
+    - Scan the receipt for itemized splitting
+    - Dismiss if it's not a shared expense
+  </Step>
+</Steps>
+
+## Architecture
+
+```
+┌─────────────┐
+│  User's     │
+│  Bank       │
+└──────┬──────┘
+       │
+       │ OAuth Connection
+       ▼
+┌─────────────┐
+│   Plaid     │
+│   API       │
+└──────┬──────┘
+       │
+       │ Webhooks
+       ▼
+┌─────────────┐      ┌──────────────┐
+│  Vercel     │─────▶│  LLM API     │
+│  Functions  │      │  (OpenAI)    │
+└──────┬──────┘      └──────────────┘
+       │
+       │ Store Transaction
+       ▼
+┌─────────────┐
+│  Supabase   │
+│  Database   │
+└──────┬──────┘
+       │
+       │ Push Notification
+       ▼
+┌─────────────┐
+│   Divvy     │
+│   Mobile    │
+└─────────────┘
+```
+
+## Plaid Link Integration
+
+Plaid Link is a drop-in module that handles the OAuth flow for bank connection:
+
+### Android Implementation (Planned)
+
+```kotlin
+// Planned implementation structure
+class PlaidLinkActivity : ComponentActivity() {
+    
+    private val linkTokenHandler = PlaidHandler.create(
+        application = application,
+        linkTokenConfiguration = LinkTokenConfiguration(
+            token = linkToken  // Obtained from backend
+        )
+    )
+    
+    fun openPlaidLink() {
+        linkTokenHandler.open()
+    }
+    
+    private val plaidHandler = registerForActivityResult(
+        OpenPlaidLink()
+    ) { result ->
+        when (result) {
+            is LinkSuccess -> {
+                // Send public_token to backend to exchange for access_token
+                exchangePublicToken(result.publicToken)
+            }
+            is LinkExit -> {
+                // User exited the flow
+                handleLinkExit(result.error)
+            }
+        }
+    }
+}
+```
+
+### Dependencies (To Be Added)
+
+```kotlin
+// Expected additions to app/build.gradle.kts
+implementation("com.plaid.link:sdk-core:4.x.x")
+```
+
+## Backend Components
+
+### Link Token Generation
+
+The backend (likely a Vercel serverless function) creates a link_token:
+
+```typescript
+// Vercel Function: /api/plaid/create-link-token
+import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid';
+
+const plaidClient = new PlaidApi(new Configuration({
+  basePath: PlaidEnvironments.sandbox,  // or production
+  baseOptions: {
+    headers: {
+      'PLAID-CLIENT-ID': process.env.PLAID_CLIENT_ID,
+      'PLAID-SECRET': process.env.PLAID_SECRET,
+    },
+  },
+}));
+
+export default async function handler(req, res) {
+  const response = await plaidClient.linkTokenCreate({
+    user: { client_user_id: req.userId },
+    client_name: 'Divvy',
+    products: ['transactions'],
+    country_codes: ['US'],
+    language: 'en',
+    webhook: 'https://your-api.vercel.app/api/plaid/webhook',
+  });
+  
+  res.json({ link_token: response.data.link_token });
+}
+```
+
+### Token Exchange
+
+```typescript
+// Vercel Function: /api/plaid/exchange-token
+export default async function handler(req, res) {
+  const { public_token, user_id } = req.body;
+  
+  // Exchange public_token for access_token
+  const response = await plaidClient.itemPublicTokenExchange({
+    public_token,
+  });
+  
+  const accessToken = response.data.access_token;
+  const itemId = response.data.item_id;
+  
+  // Store access_token securely in Supabase
+  await supabase.from('plaid_items').insert({
+    user_id,
+    access_token: accessToken,  // Encrypt in production!
+    item_id: itemId,
+    created_at: new Date().toISOString(),
+  });
+  
+  res.json({ success: true });
+}
+```
+
+### Webhook Handler
+
+```typescript
+// Vercel Function: /api/plaid/webhook
+export default async function handler(req, res) {
+  const { webhook_type, webhook_code, item_id } = req.body;
+  
+  if (webhook_type === 'TRANSACTIONS') {
+    if (webhook_code === 'DEFAULT_UPDATE') {
+      // New transactions available
+      await syncTransactions(item_id);
+    }
+  }
+  
+  res.json({ received: true });
+}
+
+async function syncTransactions(itemId: string) {
+  // Get access_token for this item
+  const { data } = await supabase
+    .from('plaid_items')
+    .select('access_token, user_id')
+    .eq('item_id', itemId)
+    .single();
+  
+  // Fetch transactions from Plaid
+  const response = await plaidClient.transactionsGet({
+    access_token: data.access_token,
+    start_date: '2026-03-01',
+    end_date: '2026-03-03',
+  });
+  
+  // Process each transaction
+  for (const transaction of response.data.transactions) {
+    await categorizeAndNotify(transaction, data.user_id);
+  }
+}
+```
+
+## LLM-Powered Categorization
+
+As mentioned in the README, Divvy uses Vercel's Edge Functions with LLM capabilities to categorize transactions:
+
+```typescript
+// Vercel Edge Function: /api/categorize-transaction
+import { OpenAI } from 'openai';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+async function categorizeTransaction(transaction: PlaidTransaction) {
+  const prompt = `
+Analyze this transaction and determine if it's likely to be a shared expense:
+
+Merchant: ${transaction.merchant_name}
+Amount: $${transaction.amount}
+Category: ${transaction.category.join(' > ')}
+Date: ${transaction.date}
+
+Respond in JSON format:
+{
+  "is_shared": boolean,
+  "confidence": number (0-1),
+  "suggested_category": string,
+  "reasoning": string
+}
+`;
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4',
+    messages: [{ role: 'user', content: prompt }],
+    response_format: { type: 'json_object' },
+  });
+  
+  return JSON.parse(response.choices[0].message.content);
+}
+
+async function categorizeAndNotify(
+  transaction: PlaidTransaction,
+  userId: string
+) {
+  const analysis = await categorizeTransaction(transaction);
+  
+  if (analysis.is_shared && analysis.confidence > 0.7) {
+    // Store transaction in Supabase
+    await supabase.from('detected_transactions').insert({
+      user_id: userId,
+      transaction_id: transaction.transaction_id,
+      merchant: transaction.merchant_name,
+      amount_cents: Math.round(transaction.amount * 100),
+      detected_at: new Date().toISOString(),
+      category: analysis.suggested_category,
+      confidence: analysis.confidence,
+    });
+    
+    // Send push notification to user
+    await sendPushNotification(userId, {
+      title: `Split ${transaction.merchant_name}?`,
+      body: `We detected a $${transaction.amount} expense`,
+      data: {
+        transaction_id: transaction.transaction_id,
+        deep_link: `divvy://expense/create?tx=${transaction.transaction_id}`,
+      },
+    });
+  }
+}
+```
+
+## Database Schema (Planned)
+
+New tables to support Plaid integration:
+
+### `plaid_items`
+
+```sql
+CREATE TABLE plaid_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  access_token TEXT NOT NULL,  -- Encrypt in production
+  item_id TEXT NOT NULL UNIQUE,
+  institution_id TEXT,
+  institution_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  last_synced_at TIMESTAMPTZ
+);
+```
+
+### `detected_transactions`
+
+```sql
+CREATE TABLE detected_transactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  transaction_id TEXT NOT NULL UNIQUE,
+  merchant TEXT,
+  amount_cents BIGINT,
+  detected_at TIMESTAMPTZ DEFAULT NOW(),
+  category TEXT,
+  confidence DECIMAL(3,2),
+  status TEXT DEFAULT 'pending',  -- pending, accepted, dismissed
+  linked_expense_id UUID REFERENCES expenses(id),
+  
+  INDEX idx_user_status (user_id, status),
+  INDEX idx_detected_at (detected_at DESC)
+);
+```
+
+<Warning>
+**Security**: Access tokens must be encrypted at rest. Consider using Supabase Vault or a secrets management service like AWS Secrets Manager.
+</Warning>
+
+## Environment Variables
+
+Add to your Vercel project or backend `.env`:
+
+```bash
+PLAID_CLIENT_ID=your_client_id
+PLAID_SECRET=your_secret_key
+PLAID_ENV=sandbox  # or production
+OPENAI_API_KEY=sk-...
+```
+
+## Privacy & Security
+
+### Data Minimization
+
+Divvy should only request the minimum data needed:
+- **Transactions product** only (not Identity, Assets, etc.)
+- Last 30 days of transactions (configurable)
+- No storage of sensitive account numbers
+
+### User Consent
+
+Clearly communicate:
+- What data is being accessed
+- How it will be used
+- How to disconnect banks
+- Data retention policies
+
+### Encryption
+
+- Store Plaid access tokens encrypted
+- Use HTTPS for all API calls
+- Implement row-level security in Supabase
+
+## Testing
+
+### Plaid Sandbox
+
+Plaid provides a sandbox environment for testing:
+
+```kotlin
+// Test credentials that work in sandbox
+username: user_good
+password: pass_good
+```
+
+### Mock Transactions
+
+Create test transactions in sandbox:
+
+```typescript
+await plaidClient.sandboxItemFireWebhook({
+  access_token: accessToken,
+  webhook_code: 'DEFAULT_UPDATE',
+});
+```
+
+## Implementation Checklist
+
+<Steps>
+  <Step title="Set Up Plaid Account">
+    - Sign up at [plaid.com](https://plaid.com)
+    - Get API keys (client_id and secret)
+    - Enable Transactions product
+  </Step>
+  
+  <Step title="Backend API Development">
+    - Create link token endpoint
+    - Create token exchange endpoint
+    - Implement webhook handler
+    - Set up LLM categorization
+  </Step>
+  
+  <Step title="Database Schema">
+    - Create `plaid_items` table
+    - Create `detected_transactions` table
+    - Set up RLS policies
+    - Add encryption for access tokens
+  </Step>
+  
+  <Step title="Android Integration">
+    - Add Plaid SDK dependency
+    - Implement PlaidLink activity
+    - Handle token exchange callback
+    - Add deep link routing
+  </Step>
+  
+  <Step title="Notifications">
+    - Set up Firebase Cloud Messaging
+    - Implement push notification handler
+    - Create deep link actions
+  </Step>
+  
+  <Step title="Testing">
+    - Test in Plaid sandbox
+    - Verify webhook delivery
+    - Test categorization accuracy
+    - User acceptance testing
+  </Step>
+  
+  <Step title="Production Launch">
+    - Switch to production Plaid environment
+    - Complete Plaid compliance questionnaire
+    - Implement monitoring and error tracking
+    - Deploy with feature flag
+  </Step>
+</Steps>
+
+## Cost Considerations
+
+Plaid pricing is based on:
+- **Active Items**: Number of connected bank accounts
+- **API Calls**: Transaction syncs count toward quota
+
+Typical costs:
+- Development (sandbox): Free
+- Production: Pay-as-you-go or monthly plans
+
+See [Plaid Pricing](https://plaid.com/pricing/) for current rates.
+
+## Alternatives to Plaid
+
+If Plaid is not suitable:
+
+- **Manual CSV Import**: Let users upload bank statements
+- **Email Parsing**: Parse transaction notification emails
+- **Receipt Scanning Only**: Focus on OCR without bank integration
+- **Teller.io**: Open banking API (Europe/UK focused)
+- **Finicity**: Mastercard's bank data aggregation
+
+## Related Resources
+
+- [Plaid Documentation](https://plaid.com/docs/)
+- [Plaid Android SDK](https://plaid.com/docs/link/android/)
+- [Plaid Webhook Reference](https://plaid.com/docs/api/webhooks/)
+- [OpenAI API Documentation](https://platform.openai.com/docs/)
+- [Vercel Edge Functions](https://vercel.com/docs/concepts/functions/edge-functions)
