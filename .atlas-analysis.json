@@ -1,0 +1,101 @@
+{
+  "projectType": "saas",
+  "projectName": "Divvy",
+  "projectDescription": "A mobile app that simplifies group expense splitting with receipt scanning and real-time transaction tracking.",
+  "theme": "almond",
+  "primaryColor": "#10B981",
+  "lightColor": "#34D399",
+  "darkColor": "#059669",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/groups",
+              "features/expenses",
+              "features/receipt-scanning",
+              "features/split-methods",
+              "features/ledger",
+              "features/analytics"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/supabase",
+              "integrations/plaid"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Developer Reference",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/mvvm-pattern",
+              "architecture/navigation"
+            ]
+          },
+          {
+            "group": "Data Models",
+            "pages": [
+              "models/group",
+              "models/expense",
+              "models/user-profile",
+              "models/ledger-entry"
+            ]
+          },
+          {
+            "group": "Repositories",
+            "pages": [
+              "repositories/overview",
+              "repositories/group-repository",
+              "repositories/expense-repository",
+              "repositories/auth-repository"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "contributing/setup",
+              "contributing/development",
+              "contributing/testing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time expense splitting with multiple methods (equal, percentage, itemized)",
+    "Receipt scanning with automatic item extraction",
+    "Group management with member balances and ledgers",
+    "Google OAuth authentication via Supabase",
+    "Transaction analytics and activity feeds",
+    "Plaid integration for bank transaction detection"
+  ],
+  "publicApiSurface": [
+    "Group (id, name, emoji, icon, memberCount, balanceCents)",
+    "Expense (id, groupId, merchant, amountCents, splitMethod, paidByUserId)",
+    "UserProfile (id, email, displayName, avatarUrl)",
+    "LedgerEntry (id, groupId, fromUserId, toUserId, amountCents)",
+    "Split (id, expenseId, userId, shareCents, isPaid)",
+    "GroupRepository (createGroup, getGroups, getGroupById, updateGroup)",
+    "ExpensesRepository (createExpense, getExpenses, updateExpense, deleteExpense)",
+    "AuthRepository (signIn, signOut, getCurrentUser)"
+  ]
+}
